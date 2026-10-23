@@ -1,0 +1,15 @@
+.DS_Store
+DerivedData/
+.build/
+*.xcuserstate
+xcuserdata/
+*.xcresult/
+.env
+.env.*
+!.env.example
+*.p12
+*.mobileprovision
+deploy/valhalla/data/*
+!deploy/valhalla/data/.gitkeep
+deploy/local/certs/*
+!deploy/local/certs/.gitkeep

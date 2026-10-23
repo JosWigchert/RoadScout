@@ -1,0 +1,15 @@
+{
+  "trip": {
+    "status": 0, "units": "kilometers", "language": "en-US",
+    "summary": {"length": 0.22, "time": 28},
+    "legs": [{
+      "shape": "_hijbB__owHg^?g^??_q@?_q@",
+      "summary": {"length": 0.22, "time": 28},
+      "maneuvers": [
+        {"type": 1, "begin_shape_index": 0, "end_shape_index": 2, "length": 0.111, "time": 14, "instruction": "Head north on the synthetic route.", "verbal_pre_transition_instruction": "Head north."},
+        {"type": 10, "begin_shape_index": 2, "end_shape_index": 4, "length": 0.109, "time": 14, "instruction": "Turn right on the synthetic route.", "verbal_pre_transition_instruction": "Turn right."},
+        {"type": 4, "begin_shape_index": 4, "end_shape_index": 4, "length": 0, "time": 0, "instruction": "You have arrived.", "verbal_pre_transition_instruction": "You have arrived."}
+      ]
+    }]
+  }
+}

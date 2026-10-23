@@ -1,0 +1,30 @@
+{
+  "requestId": "synthetic-contract-fixture",
+  "generatedAt": "2026-10-23T00:00:00Z",
+  "routes": [{
+    "id": "synthetic-route",
+    "summary": {"distanceMeters": 220, "durationSeconds": 28},
+    "geometry": {"encoding": "polyline6", "dimensions": 2, "pointCount": 5, "data": "_hijbB__owHg^?g^??_q@?_q@"},
+    "language": "en-US",
+    "appliedPreferences": {"tolls": "neutral", "motorways": "neutral", "ferries": "neutral"},
+    "waypoints": [
+      {"requested": {"latitude": 52.09, "longitude": 5.12}, "snapped": {"latitude": 52.09, "longitude": 5.12}, "snapDistanceMeters": 0, "geometryIndex": 0},
+      {"requested": {"latitude": 52.091, "longitude": 5.1216}, "snapped": {"latitude": 52.091, "longitude": 5.1216}, "snapDistanceMeters": 0, "geometryIndex": 4}
+    ],
+    "legs": [{
+      "beginIndex": 0, "endIndex": 4,
+      "summary": {"distanceMeters": 220, "durationSeconds": 28},
+      "maneuvers": [
+        {"id": "depart", "type": "depart", "modifier": "none", "beginIndex": 0, "endIndex": 2, "distanceMeters": 111, "durationSeconds": 14, "instruction": "Head north on the synthetic route.", "spoken": {"before": "Head north.", "multiCue": false}},
+        {"id": "turn", "type": "turn", "modifier": "right", "beginIndex": 2, "endIndex": 4, "distanceMeters": 109, "durationSeconds": 14, "instruction": "Turn right on the synthetic route.", "spoken": {"before": "Turn right.", "multiCue": false}},
+        {"id": "arrive", "type": "arrive", "modifier": "none", "beginIndex": 4, "endIndex": 4, "distanceMeters": 0, "durationSeconds": 0, "instruction": "You have arrived.", "spoken": {"before": "You have arrived.", "multiCue": false}}
+      ]
+    }],
+    "timing": {"method": "maneuver_interpolation", "traffic": "unknown", "anchors": [
+      {"geometryIndex": 0, "elapsedSeconds": 0}, {"geometryIndex": 2, "elapsedSeconds": 14}, {"geometryIndex": 4, "elapsedSeconds": 28}
+    ]}
+  }],
+  "warnings": [],
+  "attributions": ["Synthetic test geometry — not a verified driving route", "© OpenStreetMap contributors — ODbL"],
+  "provenance": {"engine": "fixture", "adapterVersion": "1"}
+}

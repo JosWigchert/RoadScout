@@ -1,0 +1,21 @@
+name: roadscout-api
+services:
+  routing-api:
+    build: ../backend
+    restart: unless-stopped
+    environment:
+      LISTEN_ADDR: :8080
+      ROUTING_PROVIDER: valhalla
+      VALHALLA_BASE_URL: ${VALHALLA_BASE_URL:-http://Valhalla:8002}
+    ports:
+      - "8080:8080"
+    networks:
+      - valhalla
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+networks:
+  valhalla:
+    external: true
+    name: ${VALHALLA_NETWORK:?Set the existing Valhalla Docker network name}

@@ -1,0 +1,244 @@
+openapi: 3.1.0
+info:
+  title: RoadScout Routing API
+  version: 1.0.0
+  description: Engine-independent foreground car navigation. See phase-2.md for geometry/timing semantics.
+servers:
+  - url: https://roadscout.joswigchert.nl
+    description: App default; Traefik terminates HTTPS and forwards to Go port 8080.
+  - url: http://192.168.1.111:8080
+    description: NAS LAN; iPhone uses a Traefik HTTPS hostname instead.
+paths:
+  /v1/routes:
+    post:
+      operationId: calculateRoutes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RouteRequest'}
+      responses:
+        '200':
+          description: Recommended route first, then up to N alternatives.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RouteResponse'}
+        '400': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        '504': {$ref: '#/components/responses/Error'}
+  /v1/capabilities:
+    get:
+      operationId: capabilities
+      responses:
+        '200':
+          description: Configured adapter capabilities; not a guarantee of metadata on every road.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [apiVersion, profiles, objectives, preferences, preferenceValues, maxWaypoints, maxAlternatives, geometryEncoding, annotations, timingMethod]
+                properties:
+                  apiVersion: {type: string, const: '1'}
+                  profiles: {type: array, items: {type: string}}
+                  objectives: {type: array, items: {type: string}}
+                  preferences: {type: array, items: {type: string}}
+                  preferenceValues: {type: array, items: {type: string}}
+                  maxWaypoints: {type: integer}
+                  maxAlternatives: {type: integer}
+                  geometryEncoding: {type: string}
+                  annotations: {type: array, items: {type: string}}
+                  timingMethod: {type: string}
+  /healthz:
+    get:
+      operationId: health
+      responses:
+        '200': {description: Go process is serving requests.}
+  /readyz:
+    get:
+      operationId: readiness
+      responses:
+        '200': {description: Valhalla status endpoint responds; use a real route to verify graph coverage.}
+        '503': {$ref: '#/components/responses/Error'}
+components:
+  responses:
+    Error:
+      description: Stable code; app supplies localized wording. No raw upstream payload.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum: [invalid_request, unsupported_option, cannot_snap, no_route, limit_exceeded, busy, upstream_unavailable, upstream_timeout, invalid_upstream_response]
+                  message: {type: string}
+  schemas:
+    Point:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+    Preferences:
+      type: object
+      additionalProperties: false
+      required: [tolls, motorways, ferries]
+      properties:
+        tolls: {type: string, enum: [neutral, avoid]}
+        motorways: {type: string, enum: [neutral, avoid]}
+        ferries: {type: string, enum: [neutral, avoid]}
+    RouteRequest:
+      type: object
+      additionalProperties: false
+      required: [waypoints, profile, objective, preferences, alternatives, language]
+      properties:
+        profile: {type: string, const: car}
+        objective: {type: string, const: fastest}
+        language: {type: string, minLength: 2, maxLength: 35, pattern: '^[A-Za-z0-9-]+$'}
+        alternatives: {type: integer, minimum: 0, maximum: 2, description: Maximum additional routes.}
+        preferences: {$ref: '#/components/schemas/Preferences'}
+        waypoints:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [coordinate, kind]
+            properties:
+              coordinate: {$ref: '#/components/schemas/Point'}
+              kind: {type: string, const: stop}
+              headingDegrees: {type: number, minimum: 0, exclusiveMaximum: 360}
+              headingToleranceDegrees: {type: number, minimum: 0, maximum: 180, description: Requires headingDegrees.}
+    Summary:
+      type: object
+      required: [distanceMeters, durationSeconds]
+      properties:
+        distanceMeters: {type: number, minimum: 0}
+        durationSeconds: {type: number, minimum: 0}
+    Maneuver:
+      type: object
+      required: [id, type, modifier, beginIndex, endIndex, distanceMeters, durationSeconds, instruction, spoken]
+      properties:
+        id: {type: string, minLength: 1}
+        type:
+          type: string
+          description: depart/arrive/turn/continue/merge/on_ramp/off_ramp/fork/roundabout_enter/roundabout_exit/notification/unknown. Clients tolerate future values.
+        modifier: {type: string, description: none/straight/left/right/slight_left/slight_right/sharp_left/sharp_right/uturn; future values tolerated.}
+        beginIndex: {type: integer, minimum: 0}
+        endIndex: {type: integer, minimum: 0}
+        distanceMeters: {type: number, minimum: 0}
+        durationSeconds: {type: number, minimum: 0}
+        instruction: {type: string, minLength: 1}
+        spoken:
+          type: object
+          required: [multiCue]
+          properties:
+            alert: {type: string}
+            before: {type: string}
+            after: {type: string}
+            multiCue: {type: boolean, description: Before text already includes next instruction.}
+        streetNames: {type: array, items: {type: string}}
+        roundaboutExit: {type: integer, minimum: 1}
+        signs:
+          type: array
+          items:
+            type: object
+            required: [kind, text]
+            properties:
+              kind: {type: string, description: exit_number/exit_branch/exit_toward/exit_name}
+              text: {type: string}
+    Route:
+      type: object
+      required: [id, summary, geometry, waypoints, legs, timing, language, appliedPreferences]
+      properties:
+        id: {type: string, minLength: 1}
+        summary: {$ref: '#/components/schemas/Summary'}
+        language: {type: string, description: Actual instruction language returned by upstream.}
+        appliedPreferences: {$ref: '#/components/schemas/Preferences'}
+        geometry:
+          type: object
+          required: [encoding, dimensions, pointCount, data]
+          properties:
+            encoding: {type: string, const: polyline6}
+            dimensions: {type: integer, const: 2}
+            pointCount: {type: integer, minimum: 2, maximum: 100000}
+            data: {type: string, maxLength: 2000000}
+        waypoints:
+          type: array
+          minItems: 2
+          items:
+            type: object
+            required: [requested, snapped, snapDistanceMeters, geometryIndex]
+            properties:
+              requested: {$ref: '#/components/schemas/Point'}
+              snapped: {$ref: '#/components/schemas/Point'}
+              snapDistanceMeters: {type: number, minimum: 0}
+              geometryIndex: {type: integer, minimum: 0}
+        legs:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [beginIndex, endIndex, summary, maneuvers]
+            properties:
+              beginIndex: {type: integer, minimum: 0}
+              endIndex: {type: integer, minimum: 0}
+              summary: {$ref: '#/components/schemas/Summary'}
+              maneuvers:
+                type: array
+                minItems: 1
+                items: {$ref: '#/components/schemas/Maneuver'}
+        timing:
+          type: object
+          required: [method, traffic, anchors]
+          properties:
+            method: {type: string, const: maneuver_interpolation}
+            traffic: {type: string, const: unknown}
+            anchors:
+              type: array
+              minItems: 2
+              items:
+                type: object
+                required: [geometryIndex, elapsedSeconds]
+                properties:
+                  geometryIndex: {type: integer, minimum: 0}
+                  elapsedSeconds: {type: number, minimum: 0}
+    RouteResponse:
+      type: object
+      required: [requestId, generatedAt, routes, warnings, attributions, provenance]
+      properties:
+        requestId: {type: string}
+        generatedAt: {type: string, format: date-time}
+        routes:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items: {$ref: '#/components/schemas/Route'}
+        warnings:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code: {type: string}
+              message: {type: string}
+        attributions: {type: array, items: {type: string}}
+        provenance:
+          type: object
+          required: [engine, adapterVersion]
+          properties:
+            engine: {type: string}
+            adapterVersion: {type: string}
+            graphVersion: {type: string}

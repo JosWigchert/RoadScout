@@ -1,0 +1,11 @@
+{
+  "waypoints": [
+    {"coordinate": {"latitude": 52.0907, "longitude": 5.1214}, "kind": "stop"},
+    {"coordinate": {"latitude": 52.1552, "longitude": 5.3872}, "kind": "stop"}
+  ],
+  "profile": "car",
+  "objective": "fastest",
+  "preferences": {"tolls": "neutral", "motorways": "neutral", "ferries": "neutral"},
+  "alternatives": 2,
+  "language": "nl-NL"
+}

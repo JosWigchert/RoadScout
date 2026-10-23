@@ -1,0 +1,21 @@
+# Use with compose.yaml; requires an existing Traefik network and TLS resolver.
+services:
+  valhalla:
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-proxy}
+      traefik.http.routers.roadscout-routing.rule: Host(`${ROUTING_HOST:?Set ROUTING_HOST}`) && (Path(`/route`) || Path(`/status`))
+      traefik.http.routers.roadscout-routing.entrypoints: websecure
+      traefik.http.routers.roadscout-routing.tls: "true"
+      traefik.http.routers.roadscout-routing.tls.certresolver: ${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      traefik.http.routers.roadscout-routing.middlewares: roadscout-rate,roadscout-body
+      traefik.http.services.roadscout-routing.loadbalancer.server.port: "8002"
+      traefik.http.middlewares.roadscout-rate.ratelimit.average: "2"
+      traefik.http.middlewares.roadscout-rate.ratelimit.burst: "5"
+      traefik.http.middlewares.roadscout-body.buffering.maxRequestBodyBytes: "16384"
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-proxy}

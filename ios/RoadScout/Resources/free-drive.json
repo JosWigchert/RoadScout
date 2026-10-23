@@ -1,0 +1,17 @@
+[
+  {"latitude":52.0907,"longitude":5.1214,"speed":0,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09073,"longitude":5.1214,"speed":3,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.0908,"longitude":5.1214,"speed":7,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09091,"longitude":5.1214,"speed":12,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09103,"longitude":5.1214,"speed":13,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09115,"longitude":5.1214,"speed":13.8,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09127,"longitude":5.1214,"speed":13.4,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09139,"longitude":5.1214,"speed":13.9,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09151,"longitude":5.1214,"speed":-1,"speedAccuracy":-1,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09163,"longitude":5.1214,"speed":14,"speedAccuracy":0.5,"horizontalAccuracy":150,"course":0},
+  {"latitude":52.09175,"longitude":5.1214,"speed":13,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09183,"longitude":5.1214,"speed":9,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09187,"longitude":5.1214,"speed":4,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09187,"longitude":5.1214,"speed":0,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0},
+  {"latitude":52.09187,"longitude":5.1214,"speed":0,"speedAccuracy":0.5,"horizontalAccuracy":5,"course":0}
+]

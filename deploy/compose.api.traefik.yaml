@@ -1,0 +1,20 @@
+services:
+  routing-api:
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-proxy}
+      traefik.http.routers.roadscout-api.rule: Host(`${ROUTING_HOST:?Set the API HTTPS hostname}`)
+      traefik.http.routers.roadscout-api.entrypoints: websecure
+      traefik.http.routers.roadscout-api.tls: "true"
+      traefik.http.routers.roadscout-api.tls.certresolver: ${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      traefik.http.routers.roadscout-api.middlewares: roadscout-api-rate,roadscout-api-body
+      traefik.http.services.roadscout-api.loadbalancer.server.port: "8080"
+      traefik.http.middlewares.roadscout-api-rate.ratelimit.average: "2"
+      traefik.http.middlewares.roadscout-api-rate.ratelimit.burst: "5"
+      traefik.http.middlewares.roadscout-api-body.buffering.maxRequestBodyBytes: "16384"
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-proxy}

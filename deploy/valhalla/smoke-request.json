@@ -1,0 +1,9 @@
+{
+  "locations": [{"lat":52.0907,"lon":5.1214},{"lat":52.112,"lon":5.16}],
+  "costing":"auto",
+  "alternates":2,
+  "units":"kilometers",
+  "language":"en-US",
+  "shape_format":"polyline6",
+  "costing_options":{"auto":{"use_tolls":1,"use_highways":1}}
+}
