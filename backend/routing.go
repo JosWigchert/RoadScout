@@ -63,12 +63,13 @@ type Preferences struct {
 	Ferries   string `json:"ferries"`
 }
 type RouteRequest struct {
-	Waypoints    []WaypointRequest `json:"waypoints"`
-	Profile      string            `json:"profile"`
-	Objective    string            `json:"objective"`
-	Preferences  Preferences       `json:"preferences"`
-	Alternatives int               `json:"alternatives"`
-	Language     string            `json:"language"`
+	Waypoints               []WaypointRequest `json:"waypoints"`
+	Profile                 string            `json:"profile"`
+	Objective               string            `json:"objective"`
+	Preferences             Preferences       `json:"preferences"`
+	Alternatives            int               `json:"alternatives"`
+	Language                string            `json:"language"`
+	MaxExtraDurationPercent *int              `json:"maxExtraDurationPercent,omitempty"`
 }
 
 func (r *RouteRequest) UnmarshalJSON(data []byte) error {
@@ -109,7 +110,22 @@ type APIError struct {
 func (e *APIError) Error() string    { return e.Code }
 func apiError(code string) *APIError { return &APIError{code, strings.ReplaceAll(code, "_", " ")} }
 func (r RouteRequest) validate() error {
-	if r.Profile != "car" || r.Objective != "fastest" {
+	return r.validateFor([]string{"fastest"})
+}
+func (r RouteRequest) validateFor(objectives []string) error {
+	supported := false
+	for _, objective := range objectives {
+		if r.Objective == objective {
+			supported = true
+		}
+	}
+	if r.Profile != "car" || !supported {
+		return apiError("unsupported_option")
+	}
+	if r.MaxExtraDurationPercent != nil && (*r.MaxExtraDurationPercent < 0 || *r.MaxExtraDurationPercent > 100) {
+		return apiError("invalid_request")
+	}
+	if r.Objective != "fastest" && len(r.Waypoints) != 2 {
 		return apiError("unsupported_option")
 	}
 	if len(r.Waypoints) < 2 || len(r.Waypoints) > 10 || r.Alternatives < 0 || r.Alternatives > 2 {
@@ -198,14 +214,16 @@ type Timing struct {
 	Anchors []Anchor `json:"anchors"`
 }
 type Route struct {
-	ID          string      `json:"id"`
-	Summary     Summary     `json:"summary"`
-	Geometry    Geometry    `json:"geometry"`
-	Waypoints   []Waypoint  `json:"waypoints"`
-	Legs        []Leg       `json:"legs"`
-	Timing      Timing      `json:"timing"`
-	Language    string      `json:"language"`
-	Preferences Preferences `json:"appliedPreferences"`
+	ID          string           `json:"id"`
+	Summary     Summary          `json:"summary"`
+	Geometry    Geometry         `json:"geometry"`
+	Waypoints   []Waypoint       `json:"waypoints"`
+	Legs        []Leg            `json:"legs"`
+	Timing      Timing           `json:"timing"`
+	Language    string           `json:"language"`
+	Preferences Preferences      `json:"appliedPreferences"`
+	Objective   string           `json:"objective,omitempty"`
+	Experiment  *RouteExperiment `json:"experiment,omitempty"`
 }
 type Warning struct {
 	Code    string `json:"code"`
@@ -303,6 +321,9 @@ type vhResponse struct {
 }
 
 func (v *Valhalla) Routes(ctx context.Context, r RouteRequest) ([]Route, []Warning, error) {
+	if r.Objective != "fastest" {
+		return nil, nil, apiError("unsupported_option")
+	}
 	locations := make([]map[string]any, len(r.Waypoints))
 	for i, w := range r.Waypoints {
 		p := map[string]any{"lat": w.Coordinate.Latitude, "lon": w.Coordinate.Longitude, "type": "break"}

@@ -6,7 +6,11 @@ services:
     environment:
       LISTEN_ADDR: :8080
       ROUTING_PROVIDER: valhalla
+      ENABLE_EXPERIMENTAL_ROUTING: ${ENABLE_EXPERIMENTAL_ROUTING:-0}
       VALHALLA_BASE_URL: ${VALHALLA_BASE_URL:-http://Valhalla:8002}
+      CAMERA_DATA_DIR: /data/cameras
+    volumes:
+      - ${CAMERA_DATA_HOST_DIR:-../backend/data/cameras}:/data/cameras:rw
     ports:
       - "8080:8080"
     networks:

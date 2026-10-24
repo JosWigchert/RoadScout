@@ -25,14 +25,14 @@ struct DemoTestingView: View {
                 }
             }
             Section {
-                TextField("HTTPS API base URL", text: $apiURL)
+                TextField("Routing API base URL", text: $apiURL)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     .accessibilityLabel("Routing API base URL")
                 Button("Use default server") { apiURL = AppConfiguration.routingAPIBaseURL }
             } header: {
                 Text("Advanced routing configuration")
             } footer: {
-                Text("The normal app uses roadscout.joswigchert.nl. Change this only to test another RoadScout API. Use an HTTPS base URL without /v1/routes; changes apply to the next route preview.")
+                Text("Default for this build: \(AppConfiguration.routingAPIBaseURL). Enter the base URL without /v1/routes; changes apply to the next route preview. Release requires HTTPS. Debug also permits the configured temporary LAN server.")
             }
         }
         .navigationTitle("Demo & Testing")

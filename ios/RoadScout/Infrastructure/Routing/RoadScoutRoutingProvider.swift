@@ -6,10 +6,25 @@ protocol RoutingHTTPTransport: Sendable {
 
 struct URLSessionRoutingTransport: RoutingHTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let session = URLSession(configuration: .ephemeral, delegate: RoutingRedirectPolicy(), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse,
-              response.url?.scheme?.lowercased() == "https" else { throw RoutingError.invalidResponse }
+              let responseURL = response.url, let requestURL = request.url,
+              AppConfiguration.allowsRoutingResponse(responseURL, for: requestURL) else { throw RoutingError.invalidResponse }
         return (data, response)
+    }
+}
+
+private final class RoutingRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        guard let original = task.originalRequest?.url, let redirected = request.url,
+              AppConfiguration.allowsRoutingResponse(redirected, for: original) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }
 
@@ -19,7 +34,7 @@ struct RoadScoutRoutingProvider: RoutingProviding {
 
     init(baseURL: String, transport: any RoutingHTTPTransport = URLSessionRoutingTransport()) throws {
         guard let url = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.scheme?.lowercased() == "https", let host = url.host, !host.isEmpty,
+              AppConfiguration.allowsRoutingURL(url), let host = url.host, !host.isEmpty,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
             throw RoutingError.invalidEndpoint
         }
@@ -36,7 +51,9 @@ struct RoadScoutRoutingProvider: RoutingProviding {
         let payload = Payload(waypoints: [.init(coordinate: request.origin, headingDegrees: request.originHeading),
                                          .init(coordinate: request.destination, headingDegrees: nil)],
                               preferences: .init(tolls: request.preferences.avoidTolls ? "avoid" : "neutral",
-                                                 motorways: request.preferences.avoidHighways ? "avoid" : "neutral"))
+                                                 motorways: request.preferences.avoidHighways ? "avoid" : "neutral"),
+                              objective: request.objective.rawValue,
+                              maxExtraDurationPercent: request.objective.isExperimental ? request.maxExtraDurationPercent : nil)
         http.httpBody = try JSONEncoder().encode(payload)
         do {
             let (data, response) = try await transport.send(http)
@@ -59,8 +76,9 @@ struct RoadScoutRoutingProvider: RoutingProviding {
         struct Preferences: Encodable { let tolls: String; let motorways: String; let ferries = "neutral" }
         let waypoints: [Waypoint]
         let profile = "car"
-        let objective = "fastest"
         let preferences: Preferences
+        let objective: String
+        let maxExtraDurationPercent: Int?
         let alternatives = 2
         let language = Locale.preferredLanguages.first ?? "en-US"
     }
@@ -86,10 +104,14 @@ struct RoadScoutRoutingProvider: RoutingProviding {
                 let beginIndex: Int; let endIndex: Int
                 let instruction: String; let spoken: Spoken
                 let durationSeconds: Double
+                let streetNames: [String]?
+                let distanceMeters: Double?
             }
             let beginIndex: Int; let endIndex: Int; let maneuvers: [Maneuver]
         }
         let id: String; let summary: Summary; let geometry: Geometry; let legs: [Leg]; let timing: Timing; let language: String
+        let objective: String?
+        let experiment: RouteExperiment?
 
         func model(attribution: String) throws -> DrivingRoute {
             guard geometry.encoding == "polyline6", geometry.dimensions == 2, !legs.isEmpty,
@@ -111,13 +133,15 @@ struct RoadScoutRoutingProvider: RoutingProviding {
                     maneuvers.append(.init(id: m.id, instruction: m.instruction, spokenInstruction: m.spoken.before ?? m.instruction,
                                            beginIndex: m.beginIndex, endIndex: m.endIndex, seconds: m.durationSeconds,
                                            type: m.type, modifier: m.modifier, spokenAlert: m.spoken.alert,
-                                           spokenAfter: m.spoken.after, multiCue: m.spoken.multiCue ?? false))
+                                           spokenAfter: m.spoken.after, multiCue: m.spoken.multiCue ?? false,
+                                           streetNames: m.streetNames ?? [], distanceMeters: m.distanceMeters))
                 }
             }
             guard Set(maneuvers.map(\.id)).count == maneuvers.count else { throw RoutingError.invalidResponse }
             return try DrivingRoute(geometry: points, distanceMeters: summary.distanceMeters,
                                     durationSeconds: summary.durationSeconds, maneuvers: maneuvers,
-                                    id: id, timing: timing.anchors, language: language, attribution: attribution)
+                                    id: id, timing: timing.anchors, language: language, attribution: attribution,
+                                    objective: objective.map(RoutePlanningProfile.init(rawValue:)), experiment: experiment)
         }
     }
 }

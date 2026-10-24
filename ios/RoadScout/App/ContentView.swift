@@ -3,10 +3,16 @@ import MapKit
 
 struct ContentView: View {
     @State private var model = DrivingModel()
-    @State private var navigation = NavigationModel()
+    @State private var navigation: NavigationModel
+    @State private var cameraAlerts: CameraAlertModel
+    @State private var drivingSpeech: SpeechAnnouncer
+    @State private var cameraBounds: CameraBounds?
+    @State private var lastCameraWarningID: String?
+    @State private var selectedCamera: CameraRecord?
     @State private var planningLocation: PlanningLocationModel
     @State private var selectedPlace: Destination?
     @State private var routePlanner: RoutePlanningModel
+    @State private var routingCatalog: RoutingCatalog
     @State private var originSearch: PlaceSearchModel
     @StateObject private var recents: PlaceRecents
     @State private var search: PlaceSearchModel
@@ -16,15 +22,20 @@ struct ContentView: View {
     @State private var lastMapCamera: MapCamera?
     @State private var previewDestinationOnFix = false
     @State private var startNavigationOnFix = false
-    @State private var mapHeading: Double = 0
+    @State private var headingPresentation = DrivingHeadingPresentation()
     @State private var source: DrivingSource = .live
     @State private var showingSettings = false
+    @State private var showingRouteInfo = false
     @State private var startDemoNavigationOnFix = false
     @State private var demoError: String?
     @AppStorage("speedUnit") private var unit: SpeedUnit = .localeDefault
     @AppStorage("routingAPIURL") private var apiURL = AppConfiguration.routingAPIBaseURL
     @AppStorage("avoidTolls") private var avoidTolls = false
     @AppStorage("avoidHighways") private var avoidHighways = false
+    @AppStorage("includeExperimentalRouting") private var includeExperimentalRouting = false
+    @AppStorage("cameraWarningsEnabled") private var camerasEnabled = true
+    @AppStorage("cameraAudioEnabled") private var cameraAudioEnabled = true
+    @AppStorage("cameraWarningDistance") private var cameraWarningDistance = 500.0
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -32,45 +43,42 @@ struct ContentView: View {
     @State private var confirmingClearRecents = false
     @FocusState private var searchFocused: Bool
     // initialized in init() with a shared PlaceRecents
-    @State private var headingSmoother = HeadingSmoother(timeConstant: 0.35)
 
      private var touchTarget: CGFloat = 44
-     private var iconFrame: CGFloat = 28
-     private var drawerMaxWidth: CGFloat = 620
-     private var tinySpacing: CGFloat = 2
-     private var compactSpacing: CGFloat = 4
      private var topOverlaySpacing: CGFloat = 12
-     private var chipPadding: CGFloat = 10
      private var smallSpacing: CGFloat = 8
      private var drawerSpacing: CGFloat = 10
      private let drawerContentInset: CGFloat = 16
      // A 44-point control has a 22-point radius; adding the inset keeps the curves concentric.
      private let drawerCornerRadius: CGFloat = 38
      private var searchBarPadding: CGFloat = 10
-     private var guidanceSpacing: CGFloat = 6
-     private var guidancePadding: CGFloat = 10
-     private var buttonMinHeight: CGFloat = 40
-     private var buttonMinWidth: CGFloat = 40
      private var cameraDistance: Double = 900
      private var quickAnimationDuration: Double = 0.12
      private var springResponse: Double = 0.35
      private var springDamping: Double = 0.82
-     private var routeMinutesDivisor: Double = 60
-     private var milesFeetThreshold: Double = 160.9344
-     private var metricDistanceThreshold: Double = 1000
-     private var markerShadowRadius: Double = 4
 
     init(model: DrivingModel = DrivingModel(), initialDrawerDetent: PresentationDetent = .height(76),
          searchModel: PlaceSearchModel? = nil, planningLocation: PlanningLocationModel = PlanningLocationModel(),
-         initialDestination: Destination? = nil, navigationModel: NavigationModel = NavigationModel(),
-         routePlanner: RoutePlanningModel = RoutePlanningModel(), originSearchModel: PlaceSearchModel? = nil) {
+         initialDestination: Destination? = nil, navigationModel: NavigationModel? = nil,
+         routePlanner: RoutePlanningModel = RoutePlanningModel(defaults: .standard), originSearchModel: PlaceSearchModel? = nil,
+         routeCatalog: RoutingCatalog = RoutingCatalog(), initialFollowing: Bool = true,
+         cameraModel: CameraAlertModel = CameraAlertModel()) {
         _model = State(wrappedValue: model)
-        _navigation = State(wrappedValue: navigationModel)
+        _following = State(initialValue: initialFollowing)
+        let speech = SpeechAnnouncer()
+        _drivingSpeech = State(wrappedValue: speech)
+        _navigation = State(wrappedValue: navigationModel ?? NavigationModel(audio: speech))
+        _cameraAlerts = State(wrappedValue: cameraModel)
         _planningLocation = State(wrappedValue: planningLocation)
         _selectedPlace = State(initialValue: initialDestination)
         _routePlanner = State(wrappedValue: routePlanner)
+        _routingCatalog = State(wrappedValue: routeCatalog)
+        routePlanner.apply(options: routeCatalog.options)
         _drawerDetent = State(initialValue: initialDestination == nil ? DrawerDetent(presentationDetent: initialDrawerDetent) : (routePlanner.isEditingOrigin ? .expanded : .half))
         _source = State(initialValue: model.source)
+        var heading = DrivingHeadingPresentation()
+        heading.updateHeading(model.heading, at: Date())
+        _headingPresentation = State(initialValue: heading)
         if let fix = model.fix {
             _camera = State(initialValue: .camera(MapCamera(centerCoordinate: fix.coordinate,
                                                            distance: 650, heading: model.heading, pitch: 45)))
@@ -100,6 +108,12 @@ struct ContentView: View {
                         MapPolyline(coordinates: route.geometry.map(\.coordinate))
                             .stroke(.blue, lineWidth: 6)
                     }
+                    if camerasEnabled {
+                        CameraMapContent(cameras: cameraAlerts.cameras, zones: cameraAlerts.zones,
+                                         bounds: cameraBounds,
+                                         selectCamera: { selectedCamera = $0 },
+                                         selectCluster: { zoom(to: $0) })
+                    }
                     if !model.isDriving, selectedPlace != nil {
                         if let origin = routePlanner.customOrigin {
                             Marker(origin.name, systemImage: "circle.fill", coordinate: origin.coordinate).tint(.gray)
@@ -115,7 +129,7 @@ struct ContentView: View {
                                         .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("Select route \(index + 1)")
+                                .accessibilityLabel(RoutePresentation.title(for: route, in: navigation.routes))
                             }
                             .annotationTitles(.hidden)
                         }
@@ -134,13 +148,7 @@ struct ContentView: View {
                     if let fix = model.fix {
                         Annotation(model.source != .live ? String(localized: "Simulated position") : String(localized: "Your position"),
                                    coordinate: fix.coordinate, anchor: .center) {
-                            Image(systemName: "location.north.fill")
-                                .font(.title2).foregroundStyle(.white)
-                                .rotationEffect(.degrees(model.heading - mapHeading))
-                                .padding(topOverlaySpacing).background(.blue, in: Circle())
-                                .overlay(Circle().stroke(.white, lineWidth: 3))
-                                .shadow(radius: markerShadowRadius)
-                                .accessibilityHidden(true)
+                            DrivingPositionArrow(rotation: headingPresentation.arrowRotation)
                         }
                         .annotationTitles(.hidden)
                     }
@@ -149,20 +157,23 @@ struct ContentView: View {
                 .mapControls { MapCompass(); MapScaleView() }
                 .onMapCameraChange(frequency: .continuous) { context in
                     lastMapCamera = context.camera
-                    mapHeading = headingSmoother.update(heading: context.camera.heading, timestamp: Date())
+                    var transaction = Transaction(animation: nil)
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { headingPresentation.updateMapHeading(context.camera.heading) }
+                }
+                .onMapCameraChange(frequency: .onEnd) { context in
+                    cameraBounds = CameraViewportQuery.viewport(center: GeoPoint(latitude: context.region.center.latitude,
+                        longitude: context.region.center.longitude), latitudeDelta: context.region.span.latitudeDelta,
+                        longitudeDelta: context.region.span.longitudeDelta)
                 }
                 .ignoresSafeArea()
 
                 VStack(spacing: topOverlaySpacing) {
                     topOverlay
                         .accessibilityElement(children: .contain)
-                    if model.isDriving && (navigation.selectedRoute != nil || navigation.isLoading || navigation.message != nil) {
-                        guidanceStrip(geometry: geometry)
-                            .padding(.horizontal, topOverlaySpacing)
-                    }
                     Spacer(minLength: 0)
                     if model.isDriving {
-                        drivingControls
+                        drivingControls(compact: geometry.size.width > geometry.size.height)
                             .transition(driveControlTransition)
                     }
                 }
@@ -179,17 +190,20 @@ struct ContentView: View {
                     navigation.start(fix: fix)
                 }
                 navigation.consume(fix)
+                refreshCameraData()
+                evaluateCameraWarnings()
                 if startNavigationOnFix, let fix, navigation.selectedRoute != nil {
-                    startNavigationOnFix = false
-                    navigation.start(fix: fix)
+                    if navigation.startPreviewOrRecalculate(fix: fix) { startNavigationOnFix = false }
                 }
-                if previewDestinationOnFix, let fix, let destination = navigation.destination {
+                if previewDestinationOnFix, let fix, navigation.destination != nil {
                     previewDestinationOnFix = false
-                    navigation.preview(destination, fix: fix, endpoint: apiURL,
-                                       preferences: RoutePreferences(avoidTolls: avoidTolls, avoidHighways: avoidHighways))
+                    navigation.refreshFromGPS(fix)
                 }
             }
-            .onChange(of: navigation.selectedRoute?.id) { _, _ in
+            .onChange(of: navigation.selectedRoute) { _, _ in
+                drivingSpeech.cancelCameraWarnings()
+                cameraAlerts.stop()
+                refreshCameraData()
                 if let route = navigation.selectedRoute {
                     if model.isDriving {
                         if startNavigationOnFix, let fix = model.fix {
@@ -213,12 +227,17 @@ struct ContentView: View {
                 UIApplication.shared.isIdleTimerDisabled = driving
                 searchFocused = false
                 if driving {
+                    headingPresentation.resetHeading(model.heading, at: Date())
                     following = true
                     search.cancel()
                     originSearch.cancel()
                     planningLocation.stop(clearFix: true)
                     updateCamera()
                 } else {
+                    cameraAlerts.stop()
+                    lastCameraWarningID = nil
+                    drivingSpeech.stop()
+                    showingRouteInfo = false
                     navigation.pause()
                     search.updateOrigin(planningLocation.currentPoint)
                     previewDestinationOnFix = false
@@ -243,6 +262,10 @@ struct ContentView: View {
                     planningLocation.stop(clearFix: true)
                     search.cancel()
                     originSearch.cancel()
+                    cameraAlerts.clear()
+                    drivingSpeech.stop()
+                } else if phase == .active {
+                    refreshCameraData()
                 }
             }
             .onChange(of: planningLocation.fix) { _, _ in
@@ -275,6 +298,32 @@ struct ContentView: View {
             }
             .onChange(of: avoidTolls) { _, _ in if selectedPlace != nil, !model.isDriving { previewSelectedDestination() } }
             .onChange(of: avoidHighways) { _, _ in if selectedPlace != nil, !model.isDriving { previewSelectedDestination() } }
+            .onChange(of: routePlanner.profile) { _, _ in if selectedPlace != nil, !model.isDriving { previewSelectedDestination() } }
+            .onChange(of: routePlanner.maxExtraDurationPercent) { _, _ in if selectedPlace != nil, !model.isDriving { previewSelectedDestination() } }
+            .onChange(of: includeExperimentalRouting) { _, _ in
+                routePlanner.applyCatalog(routingCatalog, includeExperimental: includeExperimentalRouting)
+                if selectedPlace != nil, !model.isDriving { previewSelectedDestination() }
+            }
+            .onChange(of: routingCatalog.options) { _, _ in
+                routePlanner.applyCatalog(routingCatalog, includeExperimental: includeExperimentalRouting)
+            }
+            .onChange(of: apiURL) { _, newValue in
+                cameraAlerts.clear()
+                drivingSpeech.cancelCameraWarnings()
+                routingCatalog.load(endpoint: newValue)
+                refreshCameraData()
+            }
+            .onChange(of: cameraBounds) { _, _ in if !model.isDriving { refreshCameraData() } }
+            .onChange(of: cameraAlerts.cameras) { _, _ in evaluateCameraWarnings() }
+            .onChange(of: cameraAlerts.zones) { _, _ in evaluateCameraWarnings() }
+            .onChange(of: navigation.muted) { _, muted in drivingSpeech.setMuted(muted) }
+            .onChange(of: camerasEnabled) { _, enabled in
+                if !enabled { cameraAlerts.clear(); drivingSpeech.cancelCameraWarnings() }
+                else { refreshCameraData() }
+            }
+            .onChange(of: cameraAudioEnabled) { _, enabled in
+                if !enabled { drivingSpeech.cancelCameraWarnings() }
+            }
             .sheet(isPresented: .constant(!model.isDriving)) {
                 bottomDrawer(geometry: geometry)
                     .presentationDetents(selectedPlace == nil ? [DrawerDetent.collapsed.presentationDetent, .medium, .large] : [.medium, .large], selection: Binding(
@@ -297,10 +346,11 @@ struct ContentView: View {
                     } message: { Text(demoError ?? "") }
             }
             .task {
+                routingCatalog.load(endpoint: apiURL)
                 guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
-                if apiURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    apiURL = AppConfiguration.routingAPIBaseURL
-                }
+                apiURL = AppConfiguration.migratedRoutingAPIURL(apiURL)
+                routePlanner.applyCatalog(routingCatalog, includeExperimental: includeExperimentalRouting)
+                refreshCameraData()
                 if selectedPlace != nil { previewSelectedDestination() }
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--navigation-replay") {
@@ -309,6 +359,13 @@ struct ContentView: View {
                     startDemo(.replay)
                 }
                 #endif
+            }
+            .task {
+                guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                    if scenePhase == .active { refreshCameraData() }
+                }
             }
         }
     }
@@ -351,35 +408,13 @@ struct ContentView: View {
         }
     }
 
-    private var drivingControls: some View {
-        VStack(spacing: 12) {
-            if source != .live {
-                Label("SIMULATED GPS", systemImage: "play.circle.fill")
-                    .font(.caption.bold())
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.orange, in: Capsule())
-                    .foregroundStyle(.black)
-            } else if model.metersPerSecond == nil || model.fix == nil {
-                Text(model.status.title)
-                    .font(.callout)
-                    .padding(12)
-                    .glassFloatingControl(cornerRadius: 24)
+    private func drivingControls(compact: Bool) -> some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            if camerasEnabled, let warning = cameraAlerts.alert {
+                CameraWarningStrip(warning: warning, unit: unit, cached: cameraAlerts.isUsingCache,
+                                   stale: cameraAlerts.metadata?.stale ?? true)
             }
-            HStack {
-                Button {
-                    if source != .live { exitDemo() }
-                    else { model.stop() }
-                } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                        .font(.headline)
-                        .padding(.horizontal, 20)
-                        .frame(height: 48)
-                        .glassFloatingControl(cornerRadius: 24)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(source != .live ? "Stop driving and exit demo" : "Stop driving")
-                Spacer()
+            if !following, model.fix != nil {
                 Button {
                     following = true
                     updateCamera()
@@ -387,12 +422,71 @@ struct ContentView: View {
                     Image(systemName: following ? "location.fill" : "location")
                 }
                 .buttonStyle(MapIconButtonStyle())
-                .disabled(model.fix == nil)
                 .accessibilityLabel("Recenter and follow")
+                .padding(.trailing, 4)
+                .transition(.opacity)
             }
+            DrivingDashboard(presentation: DrivingGuidancePresentation(route: navigation.selectedRoute,
+                progress: navigation.progress, isNavigating: navigation.isNavigating, isPaused: navigation.isPaused,
+                isLoading: navigation.isLoading, hasDestination: navigation.destination != nil,
+                destinationName: navigation.destination?.name, message: navigation.message),
+                unit: unit, muted: navigation.muted, hasRoute: navigation.selectedRoute != nil,
+                hasFix: model.fix != nil, isDemo: source != .live, compact: compact,
+                end: endDriving, toggleMute: { navigation.muted.toggle() },
+                start: { navigation.start(fix: model.fix); following = true; updateCamera() },
+                retry: { navigation.refreshFromGPS(model.fix) }, information: { showingRouteInfo = true })
+                .sheet(isPresented: $showingRouteInfo) { routeInformation }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .padding(.bottom, 8)
+    }
+
+    private func refreshCameraData() {
+        guard camerasEnabled, source == .live, scenePhase != .background else { return }
+        let bounds: CameraBounds?
+        if model.isDriving, let fix = model.fix {
+            bounds = CameraViewportQuery.around(GeoPoint(latitude: fix.latitude, longitude: fix.longitude))
+        } else {
+            bounds = cameraBounds
+        }
+        if let bounds { cameraAlerts.fetch(bounds: bounds, route: navigation.selectedRoute, endpoint: apiURL) }
+    }
+
+    private func evaluateCameraWarnings() {
+        let cue = cameraAlerts.consume(fix: model.fix, heading: model.heading, route: navigation.selectedRoute,
+            progress: navigation.progress, isDriving: model.isDriving,
+            settings: CameraWarningSettings(enabled: camerasEnabled, audioEnabled: cameraAudioEnabled && !navigation.muted && source == .live,
+                                            warningDistanceMeters: cameraWarningDistance))
+        if lastCameraWarningID != cameraAlerts.alert?.id || cameraAlerts.alert?.confident != true {
+            drivingSpeech.cancelCameraWarnings()
+            lastCameraWarningID = cameraAlerts.alert?.id
+        }
+        if let cue { drivingSpeech.speakCamera(cue.announcement, language: Locale.preferredLanguages.first ?? "en-US") }
+    }
+
+    private func endDriving() {
+        showingRouteInfo = false
+        if source != .live { exitDemo(); return }
+        closeDestination()
+        model.stop()
+        setDrawerDetent(.collapsed)
+    }
+
+    private var routeInformation: some View {
+        NavigationStack {
+            List {
+                if let route = navigation.selectedRoute {
+                    Section("Route") {
+                        Text(navigation.destination?.name ?? String(localized: "Current route"))
+                        if let via = RoutePresentation.corridorLabel(for: route) { Text(via) }
+                        Text("Arrival times are estimates and do not include live traffic.").font(.footnote)
+                    }
+                    Section("Attribution") { Text(route.attribution).font(.footnote).textSelection(.enabled) }
+                }
+            }
+            .navigationTitle("Route information")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingRouteInfo = false } } }
+        }
     }
 
     private var statusLine: String {
@@ -407,12 +501,15 @@ struct ContentView: View {
     }
 
     private func updateCamera() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
+            headingPresentation.updateHeading(model.heading, at: Date())
+        }
         guard following, let fix = model.fix else { return }
         let nextCamera = MapCameraPosition.camera(MapCamera(centerCoordinate: fix.coordinate,
             distance: model.isDriving ? 650 : cameraDistance,
-            heading: model.isDriving ? model.heading : 0,
+            heading: model.isDriving ? headingPresentation.cameraHeading : 0,
             pitch: model.isDriving ? 45 : 0))
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.65)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
             camera = nextCamera
         }
     }
@@ -424,7 +521,7 @@ struct ContentView: View {
                     RouteOriginSearchView(search: originSearch, currentLocation: searchOrigin, mapCenter: searchCenter, unit: unit,
                         useMyLocation: useCurrentRouteOrigin, choose: chooseRouteOrigin, cancel: cancelOriginSearch)
                 } else {
-                    RoutePlanningView(destination: selectedPlace, originTitle: routePlanner.originTitle, profile: routePlanner.profile,
+                    RoutePlanningView(destination: selectedPlace, planner: routePlanner,
                         navigation: navigation, unit: unit,
                         locationMessage: routePlanner.customOrigin == nil ? (planningLocation.isRequesting ? String(localized: "Finding your location…") : planningLocation.message) : nil,
                         editOrigin: editRouteOrigin, editDestination: editRouteDestination,
@@ -433,6 +530,7 @@ struct ContentView: View {
             } else {
                 HStack(alignment: .center, spacing: drawerSpacing) {
                     searchBar
+                    planningLocationButton
                     driveButton
                 }
             if drawerDetent != .collapsed {
@@ -626,27 +724,30 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
             }
-            Button {
-                following = true
-                planningLocation.request(refresh: true)
-                if let searchOrigin {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
-                        camera = .camera(MapCamera(centerCoordinate: searchOrigin.coordinate, distance: 3_000))
-                    }
-                }
-            } label: {
-                Image(systemName: following ? "location.fill" : "location")
-                    .frame(width: touchTarget, height: touchTarget)
-                    .accessibilityHidden(true)
-            }
-            .buttonStyle(MapIconButtonStyle())
-            .accessibilityLabel("Use my location")
-            .accessibilityHint("Uses your current location for nearby places and distances")
         }
         .padding(.horizontal, searchBarPadding)
         .frame(minHeight: touchTarget)
         .frame(maxWidth: .infinity)
         .background(.quaternary, in: Capsule())
+    }
+
+    private var planningLocationButton: some View {
+        Button {
+            following = true
+            planningLocation.request(refresh: true)
+            if let searchOrigin {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
+                    camera = .camera(MapCamera(centerCoordinate: searchOrigin.coordinate, distance: 3_000))
+                }
+            }
+        } label: {
+            Image(systemName: following ? "location.fill" : "location")
+                .frame(width: touchTarget, height: touchTarget)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(MapIconButtonStyle())
+        .accessibilityLabel("Use my location")
+        .accessibilityHint("Uses your current location for nearby places and distances")
     }
 
     private func setDrawerDetent(_ detent: DrawerDetent) {
@@ -730,113 +831,25 @@ struct ContentView: View {
         navigation.end()
         originSearch.cancel()
         originSearch.clearSelection()
-        routePlanner.reset()
+        routePlanner.clearTrip()
         withAnimation(driveTransitionAnimation) { selectedPlace = nil }
         setDrawerDetent(.half)
     }
 
     private func driveToSelectedPlace() {
         guard let selectedPlace else { return }
+        let objective = navigation.selectedRoute?.objective ?? routePlanner.profile
         // A custom planning origin must never masquerade as the physical driving location.
-        navigation.preview(selectedPlace, fix: nil, endpoint: apiURL,
-                           preferences: RoutePreferences(avoidTolls: avoidTolls, avoidHighways: avoidHighways))
+        if routePlanner.customOrigin == nil, let route = navigation.selectedRoute {
+            navigation.select(route)
+        } else {
+            navigation.preview(selectedPlace, fix: nil, endpoint: apiURL,
+                               preferences: RoutePreferences(avoidTolls: avoidTolls, avoidHighways: avoidHighways),
+                               objective: objective, maxExtraDurationPercent: routePlanner.maxExtraDurationPercent)
+        }
         routePlanner.origin = .myLocation
         startNavigationOnFix = true
         beginDriving()
-    }
-
-    private func guidanceStrip(geometry: GeometryProxy) -> some View {
-        let landscape = geometry.size.width > geometry.size.height
-        return VStack(alignment: .leading, spacing: guidanceSpacing) {
-            if navigation.isLoading { ProgressView("Calculating route…") }
-            if let route = navigation.selectedRoute {
-                if let progress = navigation.progress, navigation.isNavigating {
-                    Text(route.maneuvers[progress.maneuverIndex].instruction).font(.subheadline.bold())
-                    Text("\(distanceText(progress.maneuverDistance)) · \(distanceText(progress.remainingMeters)) remaining")
-                        .font(.caption)
-                } else {
-                    Text(navigation.destination?.name ?? String(localized: "Route preview")).font(.subheadline.bold())
-                    Text("\(distanceText(route.distanceMeters)) · \(Int(route.durationSeconds / routeMinutesDivisor)) min")
-                        .font(.caption)
-                }
-                if !navigation.isNavigating, navigation.routes.count > 1 {
-                    ViewThatFits(in: .horizontal) {
-                        ScrollView(.horizontal) {
-                            HStack {
-                                ForEach(Array(navigation.routes.enumerated()), id: \.element.id) { index, option in
-                                    Button("Route \(index + 1) · \(Int(option.durationSeconds / routeMinutesDivisor)) min") { navigation.select(option) }
-                                        .buttonStyle(.bordered).tint(option.id == route.id ? .blue : .secondary)
-                                }
-                            }
-                        }
-                        ScrollView(.horizontal) {
-                            VStack(alignment: .leading) {
-                                ForEach(Array(navigation.routes.enumerated()), id: \.element.id) { index, option in
-                                    Button("Route \(index + 1) · \(Int(option.durationSeconds / routeMinutesDivisor)) min") { navigation.select(option) }
-                                        .buttonStyle(.bordered).tint(option.id == route.id ? .blue : .secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-                Text(route.attribution).font(.caption2).foregroundStyle(.secondary)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: smallSpacing) {
-                        guidanceButtons
-                    }
-                    VStack(alignment: .leading, spacing: smallSpacing) {
-                        guidanceButtons
-                    }
-                }
-            } else if let destination = navigation.destination, !navigation.isLoading {
-                Button("Retry route") {
-                    navigation.preview(destination, fix: model.fix, endpoint: apiURL,
-                                       preferences: RoutePreferences(avoidTolls: avoidTolls, avoidHighways: avoidHighways))
-                }.frame(minHeight: touchTarget)
-            }
-        }
-        .padding(guidancePadding)
-        .frame(maxWidth: landscape ? drawerMaxWidth : .infinity)
-        .glassFloatingControl(cornerRadius: 16)
-        .accessibilityElement(children: .contain)
-    }
-
-    @ViewBuilder
-    private var guidanceButtons: some View {
-        if (!navigation.isNavigating || navigation.isPaused) && navigation.progress?.arrived != true {
-            Button(navigation.isPaused ? "Resume" : "Start") {
-                if !model.isDriving {
-                    startNavigationOnFix = true
-                    beginDriving()
-                } else {
-                    navigation.start(fix: model.fix)
-                    following = true
-                    updateCamera()
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(minHeight: buttonMinHeight)
-        }
-        Button("End") { navigation.end() }
-            .buttonStyle(.bordered).frame(minHeight: buttonMinHeight)
-        Button { navigation.muted.toggle() } label: {
-            Image(systemName: navigation.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .frame(minWidth: buttonMinWidth, minHeight: buttonMinWidth)
-                .accessibilityHidden(true)
-        }
-        .accessibilityLabel(navigation.muted ? "Unmute guidance" : "Mute guidance")
-        .buttonStyle(MapIconButtonStyle())
-        Button {
-            following = true
-            updateCamera()
-        } label: {
-            Image(systemName: following ? "location.fill" : "location")
-                .frame(minWidth: buttonMinWidth, minHeight: buttonMinWidth)
-                .accessibilityHidden(true)
-        }
-        .disabled(model.fix == nil)
-        .accessibilityLabel("Recenter and follow")
-        .buttonStyle(MapIconButtonStyle())
     }
 
     private var settings: some View {
@@ -852,6 +865,31 @@ struct ContentView: View {
                     Toggle("Prefer avoiding motorways", isOn: $avoidHighways)
                     Text("Avoidance is a preference, not a guarantee. Route availability depends on map coverage.")
                         .font(.caption)
+                }
+                Section("Cameras") {
+                    Toggle("Show cameras and warnings", isOn: $camerasEnabled)
+                    Toggle("Camera audio warnings", isOn: $cameraAudioEnabled).disabled(!camerasEnabled)
+                    Picker("Warn ahead", selection: $cameraWarningDistance) {
+                        ForEach([300.0, 500.0, 800.0, 1000.0, 1500.0], id: \.self) { meters in
+                            Text(PlaceDistanceFormatter.string(meters, unit: unit)).tag(meters)
+                        }
+                    }
+                    .disabled(!camerasEnabled)
+                    Text("Average-speed sections have purple markers/lines. Average-speed measurement is not yet implemented. Audio follows the driving sound control.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                CameraDataSettings(metadata: cameraAlerts.metadata, cached: cameraAlerts.isUsingCache,
+                                   status: cameraAlerts.statusMessage)
+                Section {
+                    Toggle("Include experimental routing", isOn: $includeExperimentalRouting)
+                    if routingCatalog.source == .fallback, let message = routingCatalog.message {
+                        Text(message).font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Route styles and time limits are provided by the routing server. Experimental styles may change and can be turned off here.")
+                            .font(.caption)
+                    }
+                } header: {
+                    Text("Route styles")
                 }
                 Section("Location & privacy") {
                     Text("Search can request a single foreground location to find nearby places and show distances. Driving uses continuous location until stopped. Backgrounding pauses navigation, stops location collection and clears the planning fix. Place search uses Apple services. Route requests send origin and destination to your RoadScout server and its routing engine. No analytics or trip recording.")
@@ -880,7 +918,9 @@ struct ContentView: View {
     }
 
     private func exitDemo() {
-        routePlanner.reset()
+        cameraAlerts.clear()
+        drivingSpeech.cancelCameraWarnings()
+        routePlanner.clearTrip()
         originSearch.cancel()
         originSearch.clearSelection()
         selectedPlace = nil
@@ -912,12 +952,6 @@ struct ContentView: View {
         }
     }
 
-    private func distanceText(_ meters: Double) -> String {
-        let short = meters < (unit == .milesPerHour ? milesFeetThreshold : metricDistanceThreshold)
-        let output: UnitLength = unit == .milesPerHour ? (short ? .feet : .miles) : (short ? .meters : .kilometers)
-        let length = Measurement(value: meters, unit: UnitLength.meters).converted(to: output)
-        return "\(length.value.formatted(.number.precision(.fractionLength(short ? 0 : 1)))) \(length.unit.symbol)"
-    }
 }
 
 private enum DrawerDetent {
@@ -965,13 +999,14 @@ private enum DrawerDetent {
 private final class DrivingPreviewLocationProvider: LocationProviding {
     var onEvent: ((LocationEvent) -> Void)?
     let timestamp: Date
+    let speed: Double
 
-    init(timestamp: Date) { self.timestamp = timestamp }
+    init(timestamp: Date, speed: Double = 13.89) { self.timestamp = timestamp; self.speed = speed }
 
     func start() {
         onEvent?(.access(.authorized))
         onEvent?(.fix(LocationFix(latitude: 52.09, longitude: 5.12,
-                                  speed: 13.89, speedAccuracy: 0.5,
+                                  speed: speed, speedAccuracy: 0.5,
                                   horizontalAccuracy: 5, course: 45,
                                   timestamp: timestamp)))
     }
@@ -1001,4 +1036,28 @@ private func drivingPreviewModel() -> DrivingModel {
     ContentView(model: drivingPreviewModel())
         .preferredColorScheme(.dark)
 }
+
+@MainActor private final class DashboardPreviewAudio: AudioAnnouncing {
+    func speak(_ text: String, language: String) { }
+    func stop() { }
+}
+
+extension ContentView {
+    @MainActor static func navigationDashboardPreview(unavailableSpeed: Bool = false, panned: Bool = false) -> ContentView {
+        let timestamp = Date()
+        let driving = DrivingModel(makeProvider: { _ in
+            DrivingPreviewLocationProvider(timestamp: timestamp, speed: unavailableSpeed ? -1 : 13.89)
+        }, now: { timestamp })
+        driving.start(source: .navigationReplay)
+        let navigation = NavigationModel(audio: DashboardPreviewAudio(), now: { timestamp })
+        try? navigation.loadDemo()
+        navigation.start(fix: driving.fix)
+        return ContentView(model: driving, navigationModel: navigation, initialFollowing: !panned)
+    }
+}
+
+#Preview("Driving · navigation bottom card") { ContentView.navigationDashboardPreview() }
+#Preview("Driving · unknown speed, no banner") { ContentView.navigationDashboardPreview(unavailableSpeed: true) }
+#Preview("Driving · panned, recenter above card") { ContentView.navigationDashboardPreview(panned: true) }
+#Preview("Driving · navigation landscape", traits: .landscapeLeft) { ContentView.navigationDashboardPreview() }
 #endif

@@ -1,5 +1,9 @@
 # Phase 2 · routing and foreground navigation
 
+Owner-requested temporary LAN test override · 2026-10-24: Debug iOS uses the Mac-hosted Go API at `http://192.168.1.157:8080` with a narrowly scoped Debug-only HTTP allowance; Go listens on all interfaces and continues using NAS Valhalla. Release remains public HTTPS-only. Real simulator URLSession routing through this LAN chain passed; see README/testing notes for startup, migration and reversion.
+
+Owner-prioritized early prototype · 2026-10-24: the normal car/Fastest path below remains unchanged. Explicit `ENABLE_EXPERIMENTAL_ROUTING=1` adds Scenic/More Corners candidate reranking, documented in `phase-6-prototype.md`; this is not completion of Phase 6 or earlier device acceptance. Optional objective/experiment metadata and detour budget are described in the backward-compatible OpenAPI 1.1 schema. Route alternatives now preserve supplied road names for factual labels, and selected alternatives can be retained at drive entry when physical GPS matches their start.
+
 ## Approved architecture / acceptance plan (before implementation)
 
 Owner approved introducing a small Go API now, overriding the original Phase-8-only Go restriction. Swift calls the engine-independent `/v1/routes` contract over HTTPS. Traefik terminates TLS; Go listens on HTTP :8080, NAS LAN address 192.168.1.111:8080, and calls http://Valhalla:8002 on the existing user-defined Docker network. Reuse the owner's `ghcr.io/gis-ops/docker-valhalla/valhalla:latest` Europe build. Do not start another graph import. The mutable image tag is not a verified engine version.

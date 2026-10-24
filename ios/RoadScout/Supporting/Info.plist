@@ -22,6 +22,21 @@
 	<string>RoadScout uses your location to find nearby places and show distances while searching. During a drive, it shows your GPS speed, position and heading, and follows your selected route.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>RoadScout connects to your self-hosted routing API when it is on your local network to calculate routes.</string>
+#if ROADSCOUT_LOCAL_TESTING
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>192.168.1.157</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+#endif
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

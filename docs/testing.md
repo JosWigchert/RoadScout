@@ -1,5 +1,79 @@
 # Testing
 
+## Larger detour budgets and route-preference regression · acceptance plan
+
+- Add +85% and +100% alongside +15/+30/+50; use one shared list for the picker and persisted-value validation. The API already accepts budgets through 100%.
+- Closing Directions/ending a drive clears trip selection/origin/editor/request state without silently resetting the user's objective or detour limit. Persist valid explicit choices in injected defaults; Release still offers/loads only supported profiles.
+- Verify +85/+100 propagate through planning and wire payloads, survive trip teardown/relaunch and stay within the backend cap. Avoid speculative scoring changes until the reported polder journey can be reproduced with matching origin/destination/settings.
+
+## Bottom driving dashboard and responsive heading · acceptance plan
+
+- Driving uses one bottom card containing the current maneuver/distance, estimated arrival/remaining time/distance and End/sound controls. Preserve loading/error/retry, ready/resume and arrival states. Free drive has a compact card and an exit action.
+- Remove the separate large Stop button and measured-speed-unavailable banner. Unknown measured speed remains a dash. End stops the session/GPS and returns to planning; preserve a visible synthetic-GPS indicator for demos.
+- Recenter is separate, just above the bottom card at its right edge, and only appears after leaving follow mode. Full route attribution remains accessible via route information.
+- Keep existing route selection/calculation/prototype behavior. Use a compact landscape dashboard so speed/limit and bottom guidance do not compete for vertical space.
+- Replace compounded 1.2 s + 0.7 s + 0.85 s heading delays with a responsive 0.3 s display filter, brief source-heading interpolation, immediate actual-map compensation and 0.35 s camera easing. Reduced Motion disables interpolation. Test north wrap, response/settling and dashboard state/metrics; build/test and inspect navigation/free-drive previews.
+
+### Verification · 2026-10-24
+
+- Debug build/full suite with both real LAN opt-ins: **74 methods / 97 executed cases passed**, zero failures/skips. Release build/full suite (`ENABLE_TESTABILITY=YES`): **72 methods / 95 executed cases passed**, zero failures/skips.
+- Five new presentation tests cover maneuver symbols/distances, remaining rather than whole-route metrics, estimated arrival, free-drive no-data behavior, loading/retry, pause/arrival, rerouting continuity and safe handling of missing/out-of-range progress. Heading tests now require a responsive step response and settling with the 0.3 s filter while retaining north-wrap/camera-compensation/invalid-sample checks.
+- Installed Debug and inspected `--driving-dashboard-preview --missing-speed --panned`: bottom maneuver/arrival/time/distance/End/sound/info card, separate recenter above its right edge, speed dash and no separate GPS-speed banner or large Stop control. Inspected `--replay` free-drive screen: compact bottom card, End and demo badge, no recenter while following. Apple map attribution remained visible in these screenshots.
+- Full-screen navigation/unknown-speed/recenter/landscape Canvas previews compile. Actual landscape device layout, manual End/sound/info/recenter taps, animation feel, Reduced Motion/VoiceOver/Dynamic Type extremes and physical road behavior remain hands-on checks. Static screenshots do not establish rotation smoothness or device latency.
+- Full route attribution is exposed by the bottom card's information sheet; End explicitly stops GPS and returns to planning. Core route-objective calculations were not changed in this layout refinement.
+
+## Owner-prioritized routing prototype and route names · 2026-10-24
+
+Acceptance plan was recorded before implementation in `phase-6-prototype.md`; the requirements document records the owner's explicit early-prototype priority.
+
+- Go race tests and vet passed. Added coverage for actual bend geometry versus vertex density, eligible road/surface/density filtering, maneuver/roundabout/U-turn exclusions, Scenic versus Corners ranking, candidate deduplication, travel-time cap, truthful no-improvement/metadata fallback, disabled capabilities and trace shape validation.
+- Final Debug `build test` with `TEST_RUNNER_ROADSCOUT_LAN_SMOKE=1 TEST_RUNNER_ROADSCOUT_EXPERIMENTAL_SMOKE=1`: **69 methods / 92 executed cases passed**, zero failures/skips. Both opt-in tests exercised real app URLSession → hosted Go → NAS Valhalla; prototype metrics/road metadata decoded successfully. Naming/optional-wire fields, GPS refresh objective/budget propagation and preservation of a selected alternative near its start are also covered.
+- Release `build test` with `ENABLE_TESTABILITY=YES`: **67 methods / 90 executed cases passed**, zero failures/skips. Release offers only Fastest in its UI; experimental server behavior is opt-in.
+- Real responses for all three objectives validated against `routing-api.yaml`. Live Utrecht/Amersfoort and Limburg comparisons, including positive Sittard/Vaals improvement and honest no-improvement cases, are recorded in `phase-6-prototype.md`. Default Fastest still returns the existing route set without trace-analysis load.
+- Inspected the `--live-corners-preview` simulator screenshot with real route geometry, road-based naming, profile/budget controls and qualifying-bend metrics. Its GPS/search input is synthetic. Manual menu/route/Drive tapping, actual road/scenery validation, accessibility and physical-device/CarPlay checks remain pending.
+
+## Temporary hosted LAN testing · acceptance plan
+
+- Bind the existing Go API to `0.0.0.0:8080` and verify readiness/real routing through the Mac's LAN IP (`192.168.1.157`), keeping the NAS Valhalla upstream.
+- Debug defaults to `http://192.168.1.157:8080` and migrates the previously stored public default. Preserve explicit unrelated overrides. Release defaults to public HTTPS and migrates the temporary LAN value back.
+- Permit HTTP only for this configured Debug host/port, including transport responses. Reject other HTTP endpoints and HTTPS-to-HTTP downgrades. Release remains HTTPS-only; scope ATS exceptions to Debug configuration and the LAN host.
+- Build Debug/Release, inspect processed Info.plists and run endpoint/configuration tests. Use an opt-in live simulator request to exercise the actual URLSession/ATS path; physical iPhone local-network permission/connectivity remains a separate check.
+
+### Verification · 2026-10-24
+
+- Restarted the existing Go executable with `LISTEN_ADDR=0.0.0.0:8080`, upstream NAS Valhalla unchanged. Listener is on all interfaces; `http://192.168.1.157:8080/readyz` passes. The LAN sample route returns three real routes, fastest 28.056 km / 1435.199 s, no warnings.
+- Ran README's Debug build/full tests with `TEST_RUNNER_ROADSCOUT_LAN_SMOKE=1`: **63 test methods / 86 executed cases passed**, zero failures/skips. XCResult confirms `optInLiveLANRouteUsesRealAppTransport()` passed, using the real iOS simulator URLSession transport to the Mac IP and decoding real routes; it was not merely a mocked/disabled test.
+- Built/tested Release with `ENABLE_TESTABILITY=YES -only-testing:RoadScoutTests/LocalRoutingConfigurationTests`: all three configuration/policy tests passed. Release default/migration and HTTP rejection are verified. Debug processed Info.plist contains only the local-network/specific-IP HTTP allowance; Release contains no `NSAppTransportSecurity` exception dictionary.
+- Reinstalled/launched Debug normally and confirmed persisted `routingAPIURL` became `http://192.168.1.157:8080` after preference synchronization. Explicit unrelated overrides are retained. Test hostname/port checks and redirect policy reject other HTTP hosts/ports and HTTPS downgrades.
+- Physical iPhone signing, Local Network permission, Mac firewall and actual Wi-Fi connectivity remain untested; simulator transport success is not a physical-device/road claim.
+
+## Live local Go → NAS Valhalla smoke test · 2026-10-24
+
+- Retested the running Go API at `http://127.0.0.1:8080`, using upstream `http://192.168.1.111:8002`. `/healthz` returned `ok`; `/readyz` returned `ready`.
+- Direct Valhalla `/status` succeeded and reported version **3.5.1**, `tileset_last_modified: 1792771932` and the route action. The image digest and original OSM source timestamp are not established by that status response.
+- Posted `deploy/route-request.json` (Utrecht → Amersfoort, car/fastest, two alternatives, Dutch instructions requested) through local Go. Returned **three routes**, Valhalla provenance and no warnings: 28.056 km / 1435.199 s (23.9 min), 27.82 km / 26.5 min, and 39.72 km / 30.9 min. Reported polyline6 point counts: 668, 803 and 762; each had one maneuver-bearing leg.
+- This supersedes the earlier local upstream-unavailable result and verifies real routing through local Go to the NAS for this request. Public HTTPS/Traefik, physical navigation, road alignment and rerouting acceptance remain separate; no device/road/CarPlay test was performed.
+
+## Local Go startup · 2026-10-24
+
+- Built the existing backend and started it bound to `127.0.0.1:8080` with `VALHALLA_BASE_URL=http://192.168.1.111:8002`; executable/logs are in the approved temporary directory, not source.
+- Local `/healthz` and `/v1/capabilities` passed. `/readyz` and the sample `deploy/route-request.json` request returned HTTP 503 `upstream_unavailable`.
+- Direct NAS `:8002/status` and local `127.0.0.1:8002/status` connections failed. Docker daemon/socket was unavailable; public HTTPS health connection timed out. Local Go startup is verified, but live Valhalla connectivity/route serving remains pending.
+
+## Driving arrow and heading easing · acceptance plan
+
+- Driving position is a white arrow with a dark outline/shadow and no blue circular background.
+- Apply a 1.2-second circular low-pass filter to presentation heading for arrow/camera; interpolate the shortest angular path across north. Use actual map heading for relative arrow orientation, rather than filtering map-camera feedback.
+- Keep GPS/course inputs to navigation unchanged. Respect Reduced Motion by disabling rotation/camera interpolation. Test wraparound, delayed response, settling and invalid/out-of-order samples; build/test and inspect a synthetic driving screenshot.
+
+### Verification · 2026-10-24
+
+- Debug simulator build and full Swift test suite passed. New pure heading-presentation tests cover step-response delay/settling, continuous 359°/1° wraparound, compensation against actual camera heading, invalid/out-of-order input and new-session reset.
+- Installed Debug, launched `--replay`, and inspected a driving screenshot: white outlined arrow at the simulated location with no surrounding blue circle. Added standalone arrow Canvas preview; Canvas rendering was not exercised.
+- Rotation uses a 0.7-second arrow animation and 0.85-second camera easing, disabled for Reduced Motion. Manual rotation/Reduced Motion interaction and physical road feel remain unverified; static screenshots do not establish animation smoothness.
+
+Planning-row layout refinement · 2026-10-24: moved the current-location action outside the search capsule, between search and the steering-wheel button. Existing action/accessibility labels were retained. Simulator build passed; no new unit tests were added for this layout-only move.
+
 ## Full-route planner and editable origin · acceptance plan
 
 - Remove the visible “Limit unknown” caption, retain a dash/accessible unknown value when no posted limit is available.
@@ -8,6 +82,13 @@
 - Route planner has tappable From/To rows. From opens independent place search; choosing another place recalculates from that coordinate. My location restores the physical-location origin. Editing/canceling origin preserves destination/search state; old responses cannot replace newer requests.
 - Fastest is the only implemented profile. Keep profile/presentation extensible for future Scenic/More Corners/Dynamic work without claiming those routes exist.
 - Driving requires fresh physical GPS and recalculates from the actual driving position, not a synthetic/custom planning origin. Add model/viewport tests, compile Debug/Release and inspect synthetic full-route/origin-editor previews. Live routing/device acceptance remains separate.
+
+### Verification · 2026-10-24
+
+- Debug simulator build/full Swift test suite and Release simulator build passed. New tests cover coordinate-only/custom-origin previews without GPS, no navigation without a fresh fix, My location coordinates, late obsolete responses after an origin change, missing-origin behavior, request deduplication/reset and Fastest-only profile availability.
+- Viewport tests cover full-geometry fit above the sheet for wide/tall/short routes in portrait/landscape dimensions, dateline wrapping and distance-interpolated route label placement.
+- Installed Debug and inspected `--route-preview`, `--custom-origin-preview`, `--origin-search-preview` and `--replay` screenshots on iPhone 17 Pro. Selected geometry and endpoints fit above the medium sheet; alternate geometry/time tags and editable endpoint rows/ETA/distance cards render; custom start marker and independent origin-search rows render. Driving screenshot confirms no visible unknown-limit caption.
+- Route preview screenshots use intentionally synthetic geometry via injected Debug-only providers. They do not demonstrate live Valhalla coverage or valid road alignment. Manual origin/result/alternative/Drive tapping, keyboard/drawer gestures, live API/current GPS, actual landscape sheet behavior, accessibility and device/road/CarPlay checks remain pending.
 
 ## Place search and destination cards · acceptance plan
 
@@ -189,3 +270,19 @@ Environment: Xcode 27.0 (27A266a), Swift 6 mode, minimum iOS 18; iPhone 17 Pro /
 - No physical-device, road, CarPlay or external HTTPS/live routing verification was performed.
 - Speed-limit data remains unknown by design; no speed-limit source is implemented yet.
 - Exit Demo placement was refined to a floating control during demo mode, but full tap-through of every drawer detent was not manually exercised.
+
+## Server-driven route catalog and experimental toggle · 2026-10-24
+
+- Go `/v1/capabilities` advertises `routingOptions` (id/title/experimental/detourOptions) and aggregate `detourOptions`; disabled experiments advertise only Fastest with no budgets. Covered by a race-enabled Go test.
+- App fetches capabilities on launch and on API-URL change, builds the style and budget menus from the response, and falls back to Fastest when unreachable. Settings → Route styles → Include experimental routing hides experimental options when off. Preferences persist and reconcile with the server catalog.
+- Lenient decoding: unknown objectives remain usable; missing or newer `experiment` fields fall back to neutral values instead of failing the route.
+- Verification: Debug test suite with live LAN opt-ins passed **79 methods / 108 cases**, zero failures/skips. Go race tests and vet passed. Live capabilities checked against the local Go → NAS Valhalla chain. Inspected Directions showing a server-provided style label.
+- Pending: manual Settings toggle/menu interaction, physical-device checks, and public deployment with `ENABLE_EXPERIMENTAL_ROUTING=1`.
+
+## App icon · 2026-10-24
+
+- Created an Icon Composer document (`AppIcon.icon`) with winding-road and navigation-arrow SVG layers, an automatic gradient, glass/translucency on the road and a neutral arrow shadow.
+- Added a 1024×1024 PNG fallback for the iOS 18–25 deployment range and set `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` for Debug and Release.
+- Verified `ictool` renders a valid 1024×1024 icon; inspected the rendered image (arrow above the road, readable at small size).
+- Debug and Release simulator builds pass. Built `Assets.car` contains light/dark/tinted icon renditions plus the Icon Composer layers; both Info.plists declare `CFBundleIconName = AppIcon`.
+- Home-screen screenshot capture was not completed because the simulator had no gesture tool available and the app is not on the first page. Icon correctness is verified from the rendered document and compiled asset catalog. Manual Icon Composer editing and physical-device appearance remain unchecked.

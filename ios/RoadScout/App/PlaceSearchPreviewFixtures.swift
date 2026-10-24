@@ -41,7 +41,8 @@ private struct PreviewPlaceRouting: RoutingProviding {
             let seconds = max(120, distance / 11) + (offset == 0 ? 0 : 180)
             return try DrivingRoute(geometry: shape, distanceMeters: distance, durationSeconds: seconds,
                 maneuvers: [RouteManeuver(id: "depart", instruction: "Follow the synthetic preview route", spokenInstruction: "Synthetic route",
-                                         beginIndex: 0, endIndex: 2, seconds: seconds, type: "depart", modifier: "straight"),
+                                         beginIndex: 0, endIndex: 2, seconds: seconds, type: "depart", modifier: "straight",
+                                         streetNames: [offset == 0 ? "Demo avenue" : "Demo parkway"], distanceMeters: distance),
                             RouteManeuver(id: "arrive", instruction: "Synthetic destination", spokenInstruction: "Synthetic destination",
                                          beginIndex: 3, endIndex: 3, seconds: 0, type: "arrive", modifier: "")],
                 attribution: "Synthetic preview geometry · not a verified road route")
@@ -60,9 +61,11 @@ private struct PreviewPlaceRouting: RoutingProviding {
     func stop() { }
 }
 
-/// Synthetic search/location data, separate recents, and no live place/routing requests or GPS permission.
+/// Synthetic search/location with optional real LAN routing; never requests GPS permission.
 struct PlaceSearchFlowPreview: View {
     let showDestination: Bool
+    let liveRouting: Bool
+    let previewDestination: Destination
     @State private var search: PlaceSearchModel
     @State private var location: PlanningLocationModel
     @State private var driving: DrivingModel
@@ -70,8 +73,11 @@ struct PlaceSearchFlowPreview: View {
     @State private var planner: RoutePlanningModel
     @State private var originSearch: PlaceSearchModel
 
-    init(showDestination: Bool = false, editingOrigin: Bool = false, customOrigin: Bool = false) {
+    init(showDestination: Bool = false, editingOrigin: Bool = false, customOrigin: Bool = false,
+         profile: RoutePlanningProfile = .fastest, liveRouting: Bool = false) {
         self.showDestination = showDestination
+        self.liveRouting = liveRouting
+        previewDestination = liveRouting ? Destination(name: "Amersfoort", point: GeoPoint(latitude: 52.1552, longitude: 5.3872)) : SearchPreviewData.places[2]
         let now = Date()
         let recents = PlaceRecents(userDefaults: UserDefaults(suiteName: "RoadScout.SearchPreviews")!)
         let search = PlaceSearchModel(service: PreviewPlaceSearch(), recents: recents,
@@ -80,8 +86,13 @@ struct PlaceSearchFlowPreview: View {
         _search = State(initialValue: search)
         _location = State(initialValue: PlanningLocationModel(provider: SearchPreviewLocation(timestamp: now), now: { now }))
         _driving = State(initialValue: DrivingModel(makeProvider: { _ in SearchPreviewLocation(timestamp: now) }, now: { now }))
-        _navigation = State(initialValue: NavigationModel(provider: { _ in PreviewPlaceRouting() }))
+        _navigation = State(initialValue: NavigationModel(provider: { endpoint in
+            if liveRouting { return try RoadScoutRoutingProvider(baseURL: endpoint) }
+            return PreviewPlaceRouting()
+        }))
         let planner = RoutePlanningModel()
+        planner.apply(options: PlaceSearchFlowPreview.previewOptions)
+        planner.profile = profile
         planner.isEditingOrigin = editingOrigin
         if customOrigin { planner.origin = .place(SearchPreviewData.places[0]) }
         _planner = State(initialValue: planner)
@@ -90,19 +101,27 @@ struct PlaceSearchFlowPreview: View {
         _originSearch = State(initialValue: originSearch)
     }
 
+    static let previewOptions: [RouteOption] = [
+        .fastest,
+        RouteOption(id: "scenic", title: "Scenic", isExperimental: true, detourOptions: RouteOption.defaultDetourOptions),
+        RouteOption(id: "more_corners", title: "More Corners", isExperimental: true, detourOptions: RouteOption.defaultDetourOptions)
+    ]
+
     var body: some View {
         ContentView(model: driving, initialDrawerDetent: .medium, searchModel: search,
-                    planningLocation: location, initialDestination: showDestination ? SearchPreviewData.places[2] : nil,
-                    navigationModel: navigation, routePlanner: planner, originSearchModel: originSearch)
+                    planningLocation: location, initialDestination: showDestination ? previewDestination : nil,
+                    navigationModel: navigation, routePlanner: planner, originSearchModel: originSearch,
+                    routeCatalog: RoutingCatalog(options: PlaceSearchFlowPreview.previewOptions))
             .task {
                 location.request()
                 if !showDestination { search.search(near: SearchPreviewData.origin) }
                 if showDestination {
-                    planner.preview(SearchPreviewData.places[2], currentLocation: SearchPreviewData.origin,
-                                    navigation: navigation, endpoint: "https://preview.invalid", preferences: .init())
+                    planner.preview(previewDestination, currentLocation: SearchPreviewData.origin,
+                                    navigation: navigation, endpoint: AppConfiguration.routingAPIBaseURL, preferences: .init())
                 }
                 if planner.isEditingOrigin { originSearch.search(near: SearchPreviewData.origin) }
             }
+            .defaultAppStorage(UserDefaults(suiteName: "RoadScout.SearchPreviews")!)
     }
 }
 
@@ -114,4 +133,6 @@ struct PlaceSearchFlowPreview: View {
 #Preview("Directions · custom origin") { PlaceSearchFlowPreview(showDestination: true, customOrigin: true) }
 #Preview("Directions · starting point search") { PlaceSearchFlowPreview(showDestination: true, editingOrigin: true) }
 #Preview("Directions · landscape", traits: .landscapeLeft) { PlaceSearchFlowPreview(showDestination: true) }
+#Preview("Scenic · live LAN API, synthetic origin") { PlaceSearchFlowPreview(showDestination: true, profile: .scenic, liveRouting: true) }
+#Preview("Corners · live LAN API, synthetic origin") { PlaceSearchFlowPreview(showDestination: true, profile: .moreCorners, liveRouting: true) }
 #endif

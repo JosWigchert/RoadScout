@@ -24,6 +24,8 @@ import Observation
     @ObservationIgnored private var lastSpokenAt: Date?
     @ObservationIgnored private var endpoint = ""
     @ObservationIgnored private var preferences = RoutePreferences()
+    @ObservationIgnored private var objective: RoutePlanningProfile = .fastest
+    @ObservationIgnored private var maxExtraDurationPercent = 30
     @ObservationIgnored private var headingSmoother: HeadingSmoother?
 
     var isFreeDrive: Bool { isFreeDriving }
@@ -55,9 +57,11 @@ import Observation
         self.init(headingSmoother: smoother)
     }
 
-    func preview(_ destination: Destination, fix: LocationFix?, endpoint: String, preferences: RoutePreferences) {
+    func preview(_ destination: Destination, fix: LocationFix?, endpoint: String, preferences: RoutePreferences,
+                 objective: RoutePlanningProfile = .fastest, maxExtraDurationPercent: Int = 30) {
         end()
         self.destination = destination; self.endpoint = endpoint; self.preferences = preferences
+        self.objective = objective; self.maxExtraDurationPercent = maxExtraDurationPercent
         isFreeDriving = false
         guard let fix, fix.hasUsablePosition(at: now()) else {
             message = String(localized: "Start driving and wait for a fresh GPS position before calculating a route.")
@@ -67,11 +71,14 @@ import Observation
     }
 
     /// Planning coordinates may come from search; they are never treated as a live navigation fix.
-    func preview(_ destination: Destination, origin: GeoPoint?, endpoint: String, preferences: RoutePreferences) {
+    func preview(_ destination: Destination, origin: GeoPoint?, endpoint: String, preferences: RoutePreferences,
+                 objective: RoutePlanningProfile = .fastest, maxExtraDurationPercent: Int = 30) {
         end()
         self.destination = destination
         self.endpoint = endpoint
         self.preferences = preferences
+        self.objective = objective
+        self.maxExtraDurationPercent = maxExtraDurationPercent
         guard let origin else {
             message = String(localized: "Choose a starting point or use your location to preview the route.")
             return
@@ -81,6 +88,12 @@ import Observation
             return
         }
         calculate(origin: origin, heading: nil, rerouting: false)
+    }
+
+    func refreshFromGPS(_ fix: LocationFix?) {
+        guard let destination else { return }
+        preview(destination, fix: fix, endpoint: endpoint, preferences: preferences,
+                objective: objective, maxExtraDurationPercent: maxExtraDurationPercent)
     }
 
     func previewRoute(_ destination: Destination, fix: LocationFix?, endpoint: String, preferences: RoutePreferences) {
@@ -94,6 +107,7 @@ import Observation
     func select(_ route: DrivingRoute) {
         guard !isNavigating, routes.contains(where: { $0.id == route.id }) else { return }
         selectedRoute = route
+        if let objective = route.objective { self.objective = objective }
     }
 
     func selectDestination(_ destination: Destination, fix: LocationFix?, endpoint: String, preferences: RoutePreferences) {
@@ -124,6 +138,19 @@ import Observation
             audio.speak(departure.spokenInstruction, language: route.language); lastSpokenAt = now()
         }
         consume(fix)
+    }
+
+    /// Keep a selected alternative when its start still matches GPS; otherwise recalculate from reality.
+    @discardableResult
+    func startPreviewOrRecalculate(fix: LocationFix?) -> Bool {
+        guard let route = selectedRoute, let fix, fix.hasUsablePosition(at: now()) else { return false }
+        let point = GeoPoint(latitude: fix.latitude, longitude: fix.longitude)
+        guard point.distance(to: route.geometry[0]) <= 50 else {
+            refreshFromGPS(fix)
+            return false
+        }
+        start(fix: fix)
+        return isNavigating || progress?.arrived == true
     }
 
     func startFreeDrive(fix: LocationFix? = nil) {
@@ -158,6 +185,8 @@ import Observation
         routes = []; selectedRoute = nil; destination = nil; progress = nil; tracker = nil
         message = nil; lastReroute = nil; rerouteDelay = 15; announced = []; lastSpokenAt = nil
         isFreeDriving = false
+        objective = .fastest
+        maxExtraDurationPercent = 30
     }
 
     func consume(_ fix: LocationFix?) {
@@ -216,7 +245,8 @@ import Observation
         cancelRequest(); isLoading = true; message = rerouting ? message : nil
         let current = token
         let request = RouteRequest(origin: origin, destination: destination.point,
-                                   preferences: preferences, originHeading: heading)
+                                   preferences: preferences, originHeading: heading,
+                                   objective: objective, maxExtraDurationPercent: maxExtraDurationPercent)
         task = Task { [weak self, provider, endpoint] in
             do {
                 let service = try provider(endpoint)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"io"
 	"log"
 	"mime"
@@ -14,8 +15,11 @@ import (
 	"time"
 )
 
-func handler(provider RoutingProvider) http.Handler {
+func handler(provider RoutingProvider, cameras ...*cameraService) http.Handler {
 	mux := http.NewServeMux()
+	if len(cameras) > 0 {
+		mux.HandleFunc("POST /v1/cameras", cameras[0].serveHTTP)
+	}
 	write := func(w http.ResponseWriter, status int, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -54,7 +58,12 @@ func handler(provider RoutingProvider) http.Handler {
 		write(w, 200, map[string]string{"status": "ready"})
 	})
 	mux.HandleFunc("GET /v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		write(w, 200, map[string]any{"apiVersion": "1", "profiles": []string{"car"}, "objectives": []string{"fastest"}, "preferences": []string{"tolls", "motorways", "ferries"}, "preferenceValues": []string{"neutral", "avoid"}, "maxWaypoints": 10, "maxAlternatives": 2, "geometryEncoding": "polyline6", "annotations": []string{}, "timingMethod": "maneuver_interpolation"})
+		options := routingOptions(provider)
+		capabilities := map[string]any{"apiVersion": "1", "profiles": []string{"car"}, "objectives": routingObjectives(provider), "routingOptions": options, "detourOptions": catalogDetourOptions(options), "preferences": []string{"tolls", "motorways", "ferries"}, "preferenceValues": []string{"neutral", "avoid"}, "maxWaypoints": 10, "maxAlternatives": 2, "geometryEncoding": "polyline6", "annotations": []string{}, "timingMethod": "maneuver_interpolation"}
+		if len(cameras) > 0 {
+			capabilities["cameras"] = cameras[0].store.read().Dataset
+		}
+		write(w, 200, capabilities)
 	})
 	// Bound simultaneous graph requests. Traefik applies external rate limits.
 	slots := make(chan struct{}, 4)
@@ -82,7 +91,7 @@ func handler(provider RoutingProvider) http.Handler {
 			fail(w, apiError("invalid_request"))
 			return
 		}
-		if err := input.validate(); err != nil {
+		if err := input.validateFor(routingObjectives(provider)); err != nil {
 			fail(w, err)
 			return
 		}
@@ -119,6 +128,27 @@ func handler(provider RoutingProvider) http.Handler {
 	return mux
 }
 func main() {
+	syncOnce := flag.Bool("camera-sync-once", false, "Import NL cameras atomically and exit without starting HTTP")
+	flag.Parse()
+	dir := os.Getenv("CAMERA_DATA_DIR")
+	if dir == "" {
+		dir = "data/cameras"
+	}
+	store, loadErr := newCameraStore(dir)
+	if loadErr != nil {
+		log.Printf("camera snapshot load failed; camera data unavailable: %v", loadErr)
+	}
+	if *syncOnce {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+		defer cancel()
+		if err := store.sync(ctx, defaultCameraFetcher(), time.Time{}); err != nil {
+			log.Fatal(err)
+		}
+		snapshot := store.read()
+		encoded, _ := json.Marshal(map[string]any{"dataset": snapshot.Dataset, "cameraCount": len(snapshot.Cameras), "zoneCount": len(snapshot.Zones), "verifiedZoneCount": len(snapshot.Zones) - snapshot.Dataset.IncompleteZoneCount})
+		log.Print(string(encoded))
+		return
+	}
 	base := os.Getenv("VALHALLA_BASE_URL")
 	if base == "" {
 		base = "http://Valhalla:8002"
@@ -134,9 +164,14 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	srv := &http.Server{Addr: addr, Handler: handler(provider), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+	var router RoutingProvider = provider
+	if os.Getenv("ENABLE_EXPERIMENTAL_ROUTING") == "1" {
+		router = &experimentalRouter{base: provider, attributes: provider}
+	}
+	srv := &http.Server{Addr: addr, Handler: handler(router, newCameraService(store, provider)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go store.runSync(ctx, defaultCameraFetcher())
 	go func() {
 		<-ctx.Done()
 		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)

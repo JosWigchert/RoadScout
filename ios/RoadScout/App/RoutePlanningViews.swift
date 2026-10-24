@@ -3,8 +3,7 @@ import MapKit
 
 struct RoutePlanningView: View {
     let destination: Destination
-    let originTitle: String
-    let profile: RoutePlanningProfile
+    @Bindable var planner: RoutePlanningModel
     let navigation: NavigationModel
     let unit: SpeedUnit
     let locationMessage: String?
@@ -19,8 +18,6 @@ struct RoutePlanningView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Directions").font(.title2.bold())
-                    Label(profile.title, systemImage: "car.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(action: close) { Image(systemName: "xmark").font(.body.weight(.semibold)) }
@@ -28,9 +25,37 @@ struct RoutePlanningView: View {
                     .accessibilityLabel("Close directions")
             }
 
+            HStack {
+                if planner.canChooseStyle {
+                    Menu {
+                        Picker("Route style", selection: $planner.profile) {
+                            ForEach(planner.options) { option in Text(option.title).tag(option.profile) }
+                        }
+                    } label: {
+                        Label(planner.selectedOption?.title ?? planner.profile.fallbackTitle, systemImage: "car.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(.primary)
+                } else {
+                    Label(planner.selectedOption?.title ?? planner.profile.fallbackTitle, systemImage: "car.fill")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                }
+                Spacer()
+                if planner.usesDetourBudget {
+                    Menu {
+                        Picker("Maximum extra travel time", selection: $planner.maxExtraDurationPercent) {
+                            ForEach(planner.detourOptions, id: \.self) { value in Text("Up to \(value)% longer").tag(value) }
+                        }
+                    } label: {
+                        Label("+\(planner.maxExtraDurationPercent)% max", systemImage: "clock").font(.subheadline)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             VStack(spacing: 0) {
                 Button(action: editOrigin) {
-                    endpointRow(title: originTitle, subtitle: String(localized: "From · tap to change"), symbol: "location.fill", color: .gray)
+                    endpointRow(title: planner.originTitle, subtitle: String(localized: "From · tap to change"), symbol: "location.fill", color: .gray)
                 }
                 Divider().padding(.leading, 64)
                 Button(action: editDestination) {
@@ -43,6 +68,10 @@ struct RoutePlanningView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if planner.selectedOption?.isExperimental == true {
+                        Text("Experimental route style provided by the routing server. Results are estimates and may change.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if navigation.isLoading {
                         ProgressView("Finding the fastest route…").padding(.vertical, 12)
                     }
@@ -51,8 +80,9 @@ struct RoutePlanningView: View {
                         Text(message).font(.callout).foregroundStyle(.secondary)
                     }
                     if let selected = navigation.selectedRoute {
-                        ForEach(Array(navigation.routes.enumerated()), id: \.element.id) { index, route in
-                            routeOption(route, index: index, selected: route.id == selected.id)
+                        if let message = selected.experiment?.fallbackMessage { Text(message).font(.callout).foregroundStyle(.secondary) }
+                        ForEach(navigation.routes) { route in
+                            routeOption(route, selected: route.id == selected.id)
                         }
                         Text("Arrival times are estimates and do not include live traffic.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -90,7 +120,7 @@ struct RoutePlanningView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func routeOption(_ route: DrivingRoute, index: Int, selected: Bool) -> some View {
+    private func routeOption(_ route: DrivingRoute, selected: Bool) -> some View {
         HStack(spacing: 12) {
             Button {
                 navigation.select(route)
@@ -100,16 +130,23 @@ struct RoutePlanningView: View {
                         Text("\(max(1, Int(ceil(route.durationSeconds / 60)))) min").font(.title2.bold())
                         if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary) }
                     }
-                    Text(index == 0 ? profile.title : String(localized: "Alternative \(index + 1)"))
+                    Text(RoutePresentation.title(for: route, in: navigation.routes))
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    if let via = RoutePresentation.corridorLabel(for: route), via != RoutePresentation.title(for: route, in: navigation.routes) {
+                        Text(via).font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("\(Date().addingTimeInterval(route.durationSeconds).formatted(date: .omitted, time: .shortened)) ETA · \(PlaceDistanceFormatter.string(route.distanceMeters, unit: unit))")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    if let experiment = route.experiment, route.objective?.isExperimental == true {
+                        Text("≈\(experiment.bendCount) qualifying bends · \(Int(experiment.countrysideShare * 100))% eligible country roads · +\(Int(experiment.extraDurationPercent.rounded()))% time")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Route \(index + 1), \(max(1, Int(ceil(route.durationSeconds / 60)))) minutes")
+            .accessibilityLabel("\(RoutePresentation.title(for: route, in: navigation.routes)), \(max(1, Int(ceil(route.durationSeconds / 60)))) minutes")
             if selected {
                 Button(action: drive) {
                     Label("Drive", systemImage: "arrow.up")
@@ -141,7 +178,7 @@ struct RouteOriginSearchView: View {
             HStack {
                 Text("Starting point").font(.title2.bold())
                 Spacer()
-                Button("Cancel", action: cancel).foregroundStyle(.secondary)
+                Button("Cancel", action: cancel).foregroundStyle(.secondary).frame(minHeight: 44)
             }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -150,7 +187,9 @@ struct RouteOriginSearchView: View {
                     .onSubmit { focused = false; search.search(near: currentLocation, searchCenter: mapCenter) }
                     .onChange(of: search.query) { _, _ in search.search(near: currentLocation, searchCenter: mapCenter) }
                 if !search.query.isEmpty {
-                    Button { search.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    Button { search.query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).frame(width: 44, height: 44)
+                    }
                         .accessibilityLabel("Clear starting point search")
                 }
             }

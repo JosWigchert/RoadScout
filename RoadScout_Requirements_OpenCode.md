@@ -8,6 +8,8 @@
 
 **Owner-approved amendment · 2026-10-23:** introduce the small engine-independent Go routing API in Phase 2. Its initial adapter uses the existing Valhalla Europe deployment. This supersedes references below that defer all custom Go work to Phase 8 or describe the MVP as directly calling Valhalla. Accounts, community databases and later-phase features remain deferred. See `docs/phase-2.md` and `docs/routing-api.yaml`.
 
+**Owner-requested prototype priority · 2026-10-24:** bring an experimental Scenic/More Corners investigation forward alongside the unfinished earlier-phase acceptance gates. This is a bounded Valhalla candidate-ranking prototype, not completion of Phase 6 or permission to claim globally optimized scenic/winding routes. Keep production Fastest unchanged; see `docs/phase-6-prototype.md` for the plan, limits and acceptance checks. Section 2 remains binding.
+
 ## 1. Product vision
 
 Build a reliable, attractive navigation and driving companion app that can eventually replace Flitsmeister for its owner and later be distributed publicly. Its differentiators are:

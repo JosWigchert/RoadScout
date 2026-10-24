@@ -8,4 +8,6 @@ Phase 2 adds place queries sent to Apple MapKit and explicit routing requests co
 
 Selected destination recents are stored locally (up to ten), including supplied name/address/category/coordinates and optional business phone/website metadata. They are not a history of measured positions or driven trips. Remove a recent through its context menu or clear all in search. Distances are recomputed from the current origin and old stored distances are never treated as current. Call/Website actions open the corresponding system handler only when tapped.
 
+Route planning can send a user-selected starting-place coordinate instead of the physical location to the RoadScout routing service. That coordinate is a planning input, not a simulated GPS fix. Starting navigation uses a new physical driving fix and recalculates from it; editing a starting point does not change the measured position/speed or create trip tracking.
+
 Routing uses OpenStreetMap-derived data under ODbL; the app shows route attribution separately from MapKit's retained attribution. Source graph import timestamps, coverage and image digest need to be recorded by the operator for the Europe deployment. Synthetic demo geometry is explicitly labeled and is not a route from the live engine.

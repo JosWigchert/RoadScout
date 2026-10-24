@@ -1,0 +1,166 @@
+openapi: 3.1.0
+info:
+  title: RoadScout camera API
+  version: '1.0'
+  description: >-
+    NL OpenStreetMap mapped enforcement records, not a claim of active enforcement
+    or complete coverage. Camera availability never gates routing or readiness.
+paths:
+  /v1/cameras:
+    post:
+      summary: Query the union of a viewport and optional route corridor
+      description: >-
+        Bbox-only requests never call Valhalla. Route requests may call the configured
+        Valhalla trace_attributes service for OSM way identity evidence. Responses use
+        Cache-Control no-store; clients can explicitly persist scoped offline data.
+        No request coordinates or route bodies are logged by Go.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [bbox]
+              properties:
+                bbox:
+                  type: object
+                  additionalProperties: false
+                  required: [south, west, north, east]
+                  description: Ordered inclusive bounds; south <= north and west <= east. No antimeridian wrapping.
+                  properties:
+                    south: {type: number, minimum: -90, maximum: 90}
+                    west: {type: number, minimum: -180, maximum: 180}
+                    north: {type: number, minimum: -90, maximum: 90}
+                    east: {type: number, minimum: -180, maximum: 180}
+                route:
+                  type: object
+                  additionalProperties: false
+                  required: [encoding, data, corridorMeters]
+                  description: At most 10000 decoded points and 1000 km geometric length. Request body at most 256000 bytes.
+                  properties:
+                    encoding: {type: string, const: polyline6}
+                    data: {type: string}
+                    corridorMeters: {type: number, exclusiveMinimum: 0, maximum: 5000}
+      responses:
+        '200':
+          description: >-
+            Includes empty datasets with camera_dataset_missing warning. Viewport
+            matches plus corridor matches, once per stable entity ID; at most 5000
+            records across both arrays. Crossing zone segments are viewport matches.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CameraResponse'}
+        '400': {description: Invalid JSON or query}
+        '413': {description: Request body or route limit exceeded}
+        '415': {description: Content-Type must be application/json}
+        '429': {description: Four concurrent camera queries already in flight; Retry-After 5}
+components:
+  schemas:
+    Coordinate:
+      type: object
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+    RouteMatch:
+      type: string
+      enum: [confirmed, nearby, none]
+      description: >-
+        Omitted without a route. Nearby is geometric proximity only. Confirmed
+        requires local Valhalla edge.way_id identity, <=50m lateral distance,
+        and compatible known enforced travel direction, or local road-axis alignment
+        within 30 degrees when travel direction is unknown. Unknown direction and
+        missing road geometry cannot confirm. Projections beyond the submitted
+        route endpoints cannot confirm. This is road evidence, not lane or active
+        enforcement certainty. Missing or invalid trace metadata downgrades to nearby.
+        Zones additionally require verified geometry and monotonic forward
+        projections with way identity at every zone vertex and segment midpoint,
+        with forward segment orientation within 60 degrees of the route.
+    Dataset:
+      type: object
+      required: [version, coverage, sources, incompleteZoneCount, stale]
+      properties:
+        version:
+          type: string
+          description: SHA256 of normalized records; empty when unavailable. No-change checks preserve version.
+        coverage: {type: string, const: NL}
+        lastCheckedAt: {type: string, format: date-time, description: Last successful complete source check and durable publication}
+        lastChangedAt: {type: string, format: date-time, description: Last normalized record change}
+        sourceUpdatedAt: {type: string, format: date-time, description: Overpass timestamp_osm_base, not a per-camera activity timestamp}
+        sources:
+          type: array
+          items:
+            type: object
+            required: [id, name, license, attribution]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              license: {type: string}
+              attribution: {type: string}
+              url: {type: string, format: uri}
+        incompleteZoneCount: {type: integer, minimum: 0}
+        stale: {type: boolean, description: Check or source timestamp missing or older than 24 hours or more than five minutes in the future}
+    Camera:
+      type: object
+      required: [id, coordinate, kind, association, sourceIDs, status]
+      properties:
+        id: {type: string, description: Stable osm:node:ID; relation device memberships merge only by this identity}
+        coordinate: {$ref: '#/components/schemas/Coordinate'}
+        kind: {type: string, enum: [fixed, red_light, combined, average_speed]}
+        name: {type: string}
+        maxSpeedKph: {type: number, exclusiveMinimum: 0}
+        directionDegrees:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+          description: Enforced travel bearing derived from an ordered from/to road path; never raw camera-facing direction
+        roadRef: {type: string}
+        roadGeometry:
+          type: array
+          items: {$ref: '#/components/schemas/Coordinate'}
+          description: Connected associated road geometry when unambiguous; absent if unknown
+        roadWayIDs: {type: array, items: {type: integer, format: int64}}
+        association: {type: string, enum: [on_way, relation, unknown]}
+        sourceIDs: {type: array, items: {type: string}, description: Stable OSM entity identifiers providing the record}
+        status: {type: string, const: mapped}
+        routeDistanceMeters: {type: number, minimum: 0, description: Geometric route arclength from origin, in the NavigationTracker.traveledMeters coordinate system}
+        routeLateralMeters: {type: number, minimum: 0}
+        routeMatch: {$ref: '#/components/schemas/RouteMatch'}
+    AverageSpeedZone:
+      type: object
+      required: [id, geometry, geometryVerified, sourceIDs, status]
+      properties:
+        id: {type: string, description: Stable osm:relation:ID}
+        name: {type: string}
+        maxSpeedKph: {type: number, exclusiveMinimum: 0}
+        start: {$ref: '#/components/schemas/Coordinate'}
+        end: {$ref: '#/components/schemas/Coordinate'}
+        geometry:
+          type: array
+          items: {$ref: '#/components/schemas/Coordinate'}
+          description: Ordered actual road nodes from entry to exit. Empty for unresolved geometry; no straight connector is synthesized.
+        geometryVerified: {type: boolean}
+        directionDegrees: {type: number, minimum: 0, exclusiveMaximum: 360, description: Normalized initial enforced travel bearing}
+        sourceIDs: {type: array, items: {type: string}}
+        status: {type: string, const: mapped}
+        roadWayIDs: {type: array, items: {type: integer, format: int64}}
+        routeStartMeters: {type: number, minimum: 0}
+        routeEndMeters: {type: number, minimum: 0}
+        routeMatch: {$ref: '#/components/schemas/RouteMatch'}
+    CameraResponse:
+      type: object
+      required: [dataset, cameras, averageSpeedZones, truncated, warnings]
+      properties:
+        dataset: {$ref: '#/components/schemas/Dataset'}
+        cameras: {type: array, items: {$ref: '#/components/schemas/Camera'}}
+        averageSpeedZones: {type: array, items: {$ref: '#/components/schemas/AverageSpeedZone'}}
+        truncated: {type: boolean}
+        warnings:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code: {type: string, examples: [camera_dataset_missing, camera_dataset_stale, incomplete_zone_geometry, route_identity_unavailable, camera_results_truncated, camera_query_timeout]}
+              message: {type: string}

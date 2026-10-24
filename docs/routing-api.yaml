@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: RoadScout Routing API
-  version: 1.0.0
+  version: 1.1.0
   description: Engine-independent foreground car navigation. See phase-2.md for geometry/timing semantics.
 servers:
   - url: https://roadscout.joswigchert.nl
@@ -45,7 +45,12 @@ paths:
                 properties:
                   apiVersion: {type: string, const: '1'}
                   profiles: {type: array, items: {type: string}}
-                  objectives: {type: array, items: {type: string}}
+                  objectives: {type: array, items: {type: string}, description: Ids of supported route objectives. Clients should prefer routingOptions and fall back to this list.}
+                  routingOptions:
+                    type: array
+                    description: Server-driven route styles. Titles, experimental status and detour budgets come from the server so new styles do not require a client update.
+                    items: {$ref: '#/components/schemas/RoutingOption'}
+                  detourOptions: {type: array, items: {type: integer, minimum: 0, maximum: 100}, description: Aggregate extra-travel-time budgets advertised by the server.}
                   preferences: {type: array, items: {type: string}}
                   preferenceValues: {type: array, items: {type: string}}
                   maxWaypoints: {type: integer}
@@ -104,7 +109,8 @@ components:
       required: [waypoints, profile, objective, preferences, alternatives, language]
       properties:
         profile: {type: string, const: car}
-        objective: {type: string, const: fastest}
+        objective: {type: string, description: Route objective id advertised by /v1/capabilities. `fastest` is always available; other values (for example `scenic`, `more_corners`) are server-defined and opt-in via ENABLE_EXPERIMENTAL_ROUTING=1.}
+        maxExtraDurationPercent: {type: integer, minimum: 0, maximum: 100, default: 30, description: Prototype detour budget relative to the fastest available baseline. Experimental requests currently support exactly two waypoints and baseline distances up to 250 km.}
         language: {type: string, minLength: 2, maxLength: 35, pattern: '^[A-Za-z0-9-]+$'}
         alternatives: {type: integer, minimum: 0, maximum: 2, description: Maximum additional routes.}
         preferences: {$ref: '#/components/schemas/Preferences'}
@@ -159,6 +165,28 @@ components:
             properties:
               kind: {type: string, description: exit_number/exit_branch/exit_toward/exit_name}
               text: {type: string}
+    RoutingOption:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, description: Objective id to send as `objective` in a route request.}
+        title: {type: string, description: Human-readable label; clients fall back to a default title for known ids.}
+        experimental: {type: boolean, description: Experimental styles are hidden unless the user enables them.}
+        detourOptions: {type: array, items: {type: integer, minimum: 0, maximum: 100}, description: Extra-travel-time budgets valid for this objective.}
+    RouteExperiment:
+      type: object
+      description: Advisory prototype metadata. Clients must treat every field as optional and must not fail a working route because this object is missing, partial or uses a newer value.
+      properties:
+        requestedObjective: {type: string}
+        effectiveObjective: {type: string}
+        status: {type: string, description: improved/no_improvement/metadata_unavailable; future values tolerated.}
+        method: {type: string, const: candidate_reranking_v1}
+        baselineDurationSeconds: {type: number, exclusiveMinimum: 0}
+        extraDurationPercent: {type: number, minimum: 0, maximum: 100}
+        detourLimitPercent: {type: integer, minimum: 0, maximum: 100}
+        bendCount: {type: integer, minimum: 0, description: Estimated qualifying bend groups after road-class/surface/density/junction/U-turn filters; not every change in road direction.}
+        bendsPerKilometer: {type: number, minimum: 0}
+        countrysideShare: {type: number, minimum: 0, maximum: 1, description: Fraction of geometry on eligible paved low-road-density non-motorway roads. A countryside proxy; not scenic beauty.}
     Route:
       type: object
       required: [id, summary, geometry, waypoints, legs, timing, language, appliedPreferences]
@@ -167,6 +195,8 @@ components:
         summary: {$ref: '#/components/schemas/Summary'}
         language: {type: string, description: Actual instruction language returned by upstream.}
         appliedPreferences: {$ref: '#/components/schemas/Preferences'}
+        objective: {type: string, description: Effective objective id; an unchanged/unverified prototype fallback is `fastest`.}
+        experiment: {$ref: '#/components/schemas/RouteExperiment'}
         geometry:
           type: object
           required: [encoding, dimensions, pointCount, data]

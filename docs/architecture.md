@@ -2,12 +2,23 @@
 
 One SwiftUI app target, organized by feature and infrastructure responsibility. Keep views thin and inject the location provider into the driving model. Apple frameworks only; no external package dependencies.
 
+## Driving presentation
+
+`DrivingGuidancePresentation` is a pure snapshot of navigation state: current maneuver, remaining metrics, ready/loading/error/paused/arrival and temporary no-progress handling. `DrivingDashboard` renders that snapshot as one bottom card; it does not calculate routes or advance navigation. End calls the shared navigation/session teardown and returns to planning. Full attribution is in route information, and recenter is separate and conditional on follow state.
+
+`DrivingHeadingPresentation` filters only display course (0.3 s). Source-heading updates get brief 0.15 s easing; camera following uses 0.35 s. Map-heading feedback updates the relative continuous arrow angle with animations disabled, avoiding another delayed interpolation layer. Raw GPS/course for navigation remains independent.
+
 ## Planning search and destination presentation
 
-- `PlanningLocationModel` injects a `LocationProviding` source independently of `DrivingModel`. Production uses one `CLLocationManager.requestLocation()` after search engagement/Use my location, not a continuous driving session. It stops on first fix/failure/timeout and clears its in-memory fix on background/drive entry. Approximate search positions expire after five minutes; only precise fresh fixes can preview a route.
+- `RoutePlanningModel` owns the My location/custom-place origin, edit mode, objective and detour budget. Its request key includes endpoint/objective/budget to deduplicate unchanged plans. `NavigationModel.preview(_:origin:...)` accepts planning coordinates without converting them into GPS fixes. Objective/budget persist through fresh-GPS recalculation and rerouting. A selected preview is reused only when a fresh physical fix is within 50 m of its start; otherwise it is recalculated.
+- `PlaceMapFocus.routeRect` fits complete geometry into the exposed upper map viewport, including wide/tall shapes and dateline wrapping. Route labels interpolate by along-geometry distance. `RoutePlanningViews` renders editable From/To, estimated route cards and separate origin search. Release offers Fastest; Debug also offers opt-in Scenic/More Corners prototypes. Dynamic remains future work. `RoutePresentation` derives factual corridor names from supplied maneuver road names/distances rather than numbering every route.
+
+- Go `experimentalRouter` wraps the unchanged Fastest Valhalla provider only when `ENABLE_EXPERIMENTAL_ROUTING=1`. It generates ordinary and motorway-deemphasized `auto` candidates, deduplicates geometry, enforces the travel-time cap and evaluates at most six candidates using `trace_attributes` (two metadata requests in flight per API request). `experimental.go` isolates road eligibility, uniform resampling, maneuver exclusions and bend/countryside scoring. Effective objective/metrics/fallback status are normalized into the contract; no graph files, access restrictions or alternate engine are changed. See `phase-6-prototype.md` for limits and validation.
+
+- `PlanningLocationModel` injects a `LocationProviding` source independently of `DrivingModel`. Production uses one `CLLocationManager.requestLocation()` after search engagement/Use my location, not a continuous driving session. It stops on first fix/failure/timeout and clears its in-memory fix on background/drive entry. Approximate planning positions expire after five minutes and can supply preview coordinates; actual navigation still requires a precise fresh driving fix.
 - `PlaceProximity` recalculates distance from the current origin, sorts stably by meters or preserves provider relevance, and drops persisted distance values when no origin exists. Map center is a search bias, never represented as the user's position.
 - `PlaceSearchModel` debounces/cancels queries and completion resolution, retains canonical provider order for Best match, and publishes selected places. `SearchResult` carries optional supplied phone/website data and remains compatible with older saved recents.
-- `PlaceSearchViews` renders neutral reusable rows and destination details. `ContentView` swaps search/details, focuses a marker using `PlaceMapFocus`, and connects Drive here to a fresh driving fix and the existing RoadScout navigation model. `PlaceSearchPreviewFixtures` injects synthetic search/location/routing and a separate recents suite for Debug/Canvas inspection.
+- `PlaceSearchViews` renders neutral reusable rows and destination-detail components. `ContentView` swaps search/Directions, focuses selected geometry using `PlaceMapFocus`, and connects Drive to a fresh driving fix and the existing RoadScout navigation model. `PlaceSearchPreviewFixtures` injects synthetic search/location/routing and a separate recents suite for Debug/Canvas inspection.
 
 Phase 0 acceptance: Xcode builds the app, runs the test target, and launches without service credentials.
 
@@ -42,3 +53,7 @@ Owner approved Go in Phase 2 (`phase-2.md`), superseding the original Phase-8-on
 Normal startup uses live mode and `AppConfiguration.routingAPIBaseURL` (`https://roadscout.joswigchert.nl`), migrating empty saved endpoints without replacing explicit overrides. `DemoTestingView` groups replay actions and advanced endpoint overrides under Settings → Demo & Testing. Demo entry/exit stops the previous driving session, cancels navigation/search work and clears route state; demo source is in-memory only. Developer replay launch flags are Debug-only. A visible Exit Demo action remains on the simulated driving map.
 
 Camera, weather, scenic and CarPlay engines are not implemented in this phase. Future overlays attach to route ID and geometry position; missing road annotations must remain unknown. API adapters for other engines require server-side implementation/capability tests, while the core Swift contract stays stable.
+
+## Server-driven route catalog
+
+`/v1/capabilities` is the source of truth for route styles. Go advertises ordered `routingOptions` with `id`, `title`, `experimental` and per-style `detourOptions`, plus aggregate `detourOptions`. `RoutingCatalog` fetches and caches this for the current API URL; `RoutePlanningModel.apply(options:)` reconciles the persisted style/budget against it. Unknown objectives are represented by `RoutePlanningProfile`'s raw string, so new Go styles are usable without an app rebuild. Settings gates experimental styles. On fetch failure the catalog falls back to Fastest only. `RouteExperiment` decoding is intentionally lenient and never invalidates an otherwise valid route.

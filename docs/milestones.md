@@ -1,5 +1,27 @@
 # Milestones
 
+## Bottom driving dashboard and responsive heading · 2026-10-24
+
+Consolidated maneuver/distance, arrival/time/distance and End/sound/info into a bottom card with compact landscape rendering. Removed the large standalone Stop and measured-speed-unavailable banner; recenter appears above the card only when follow is off. End exits the session to planning; route attribution is accessible through information. Tuned display heading to 0.3 s with brief source/camera easing and immediate map compensation to remove stacked lag. Debug full tests (74 methods / 97 cases) and Release full tests (72 / 95) passed, including unchanged live LAN routing checks; navigation/unknown-speed/recenter and free-drive screens were inspected. Actual road/gesture/landscape/accessibility acceptance remains pending.
+
+## Owner-prioritized early route-objective prototype · 2026-10-24
+
+Added opt-in Go Scenic/More Corners candidate reranking using existing Valhalla car routes, surface/class/density trace metadata, junction-aware/resampled bend scoring and detour caps. Debug Directions exposes profiles and budgets; Release remains Fastest-only. Alternatives now use factual road corridors (with correct one-based fallback alternatives), profile/budget survives fresh-GPS recalculation, and selected previews are reused when GPS still matches their start. Go race tests/vet, Debug full tests including real LAN requests, Release full tests and OpenAPI live-response validation passed. Live Utrecht and Limburg comparisons and a real-LAN-routing/synthetic-origin simulator screen were inspected. This is not Phase 6 completion; broader candidate/custom-costing work and road/device calibration remain pending, alongside earlier-phase acceptance.
+
+Hosted LAN testing · 2026-10-24: Go now listens on all interfaces at the Mac's `192.168.1.157:8080`, using NAS Valhalla. Debug iOS defaults/migrates to that specific HTTP address; Release retains/migrates back to public HTTPS with no ATS exceptions. LAN routing and a real simulator URLSession route request passed; full Debug suite passed (63 methods / 86 cases), and three Release configuration tests passed. Debug's stored endpoint migration was verified on normal simulator launch. Physical iPhone network acceptance remains pending.
+
+Live local routing verified · 2026-10-24: local Go health/readiness and NAS Valhalla status now pass (reported Valhalla 3.5.1). The real Utrecht → Amersfoort sample returned three normalized routes with geometry/maneuvers and no warnings. This closes the local Go-to-Valhalla connectivity/sample-route gate; public HTTPS, graph/image provenance details, iPhone navigation and road alignment/rerouting acceptance remain open.
+
+Local backend smoke check · 2026-10-24: Go starts successfully on loopback port 8080; health/capabilities pass. Readiness and a real route request return 503 because the configured NAS Valhalla endpoint remains unreachable from this environment. Phase 2 live-routing acceptance remains open.
+
+Driving-arrow refinement · 2026-10-24: replaced the blue position puck with an outlined white arrow, added independent 1.2-second display-heading filtering and eased shortest-path arrow rotation/camera following. Navigation inputs remain unchanged. Simulator build/full tests passed and synthetic driving appearance was inspected; manual animation/device checks remain pending.
+
+Planning-row refinement · 2026-10-24: Search, separate circular current-location button, then Drive. Simulator build passed.
+
+## Full-route planner and editable starting point · 2026-10-24
+
+Selection now opens Directions, previews from physical/planning coordinates independently of an active drive, and fits full selected geometry above the sheet with muted alternative routes and selectable time labels. From opens independent origin search with My location; To can change the destination. Added estimated route cards, request deduplication/cancellation and an extensible Fastest-only profile. Driving recalculates from fresh physical GPS. Removed the visible unknown-limit caption while retaining unknown accessibility semantics. Debug/full tests and Release build verified; full-route/custom-origin/origin-search and driving screens inspected with synthetic data. Live routing and manual/device acceptance remain pending.
+
 ## Place search and destination cards · 2026-10-24
 
 Implemented neutral grouped results/suggestions/recents, category badges, nearest/best-match sorting, recalculated straight-line distances and an independent on-demand planning location fix. Selecting a place swaps the drawer to a destination card and focuses a category marker above the sheet; supplied contacts, available route alternatives, Close and Drive here are retained. Drive here hands off to fresh-fix RoadScout/Valhalla routing and guidance. Updated permission/privacy wording and added isolated synthetic search/detail previews. Debug/full tests and Release build passed, and fixture result/detail screenshots were visually inspected. Live search/route integration and manual/device interaction acceptance remain pending.
@@ -26,11 +48,11 @@ Signing refinement: app/test bundle identifiers now use `nl.joswigchert.roadscou
 | --- | --- |
 | 0 · Repository and build foundation | Verified: simulator build, fixture test and credential-free launch |
 | 1 · Free drive | Implemented; build, deterministic tests and simulator presentation verified; physical-device acceptance pending |
-| 2 · Go API + Valhalla navigation | Implemented and fixture/simulator-verified; live NAS/Europe graph, Docker image execution and device acceptance pending |
+| 2 · Go API + Valhalla navigation | Implemented; local Go → NAS Valhalla and simulator transport verified; public deployment/full coverage/device acceptance pending |
 | 3 · Camera alerts | Planned |
 | 4 · Roof Down Mode | Planned |
 | 5 · Real-world hardening | Planned |
-| 6 · Scenic / Most Corners | Planned |
+| 6 · Scenic / Most Corners | Early owner-prioritized candidate-ranking prototype verified; custom/global optimization and field acceptance pending |
 | 7 · Entitled CarPlay | Planned |
 | 8 · Shared Go services | Planned |
 
@@ -59,3 +81,11 @@ Verified the combined map-first UI redesign in the simulator without changing fe
 - Normal launch and `--navigation-replay` launch inspected in the iPhone 17 Pro simulator: map-first layout, collapsed/half/expanded drawer affordance, speed and unknown-limit chips, guidance strip, and settings/Exit Demo controls.
 - Accessibility/reduced-transparency assumptions reviewed; `GlassButtonStyle` refined for solid fills under reduced transparency and reduced-motion press feedback.
 - Remaining gaps: physical-device/VoiceOver/Dynamic Type/reduced-motion verification, real GPS/routing acceptance, and speed-limit data source (still unknown by design). No device/road/CarPlay claim is made.
+
+## Server-driven route styles · 2026-10-24
+
+Route styles, titles, experimental flags and detour budgets now come from Go `/v1/capabilities`; the app has a Settings toggle for experimental styles and falls back to Fastest when capabilities are unavailable. Go-only changes can add/rename styles or adjust budgets without an app update. Experimental metadata decodes leniently so a working route is preferred over no route. Go race tests/vet and Debug tests (79 methods / 108 cases) passed; live catalog and Directions screen inspected. Physical/public deployment acceptance remains pending.
+
+## App icon · 2026-10-24
+
+Added a winding-road Icon Composer app icon with layered SVG assets, plus a 1024 PNG fallback for iOS 18–25 and the AppIcon build setting. Icon Composer/`ictool` rendering and Debug/Release asset compilation verified; manual Icon Composer editing and device appearance remain pending.

@@ -162,11 +162,11 @@ struct DestinationDetailsView: View {
                     if routes.count > 1 {
                         ScrollView(.horizontal) {
                             HStack(spacing: 10) {
-                                ForEach(Array(routes.enumerated()), id: \.element.id) { index, route in
+                                ForEach(routes) { route in
                                     Button {
                                         chooseRoute(route)
                                     } label: {
-                                        Label("Route \(index + 1) · \(Int(route.durationSeconds / 60)) min",
+                                        Label("\(RoutePresentation.title(for: route, in: routes)) · \(Int(route.durationSeconds / 60)) min",
                                               systemImage: route.id == selectedRouteID ? "checkmark.circle.fill" : "circle")
                                             .font(.subheadline.weight(.medium))
                                             .padding(12)

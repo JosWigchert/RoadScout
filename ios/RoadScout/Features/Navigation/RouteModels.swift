@@ -35,6 +35,8 @@ struct RouteManeuver: Equatable, Sendable {
     var spokenAlert: String? = nil
     var spokenAfter: String? = nil
     var multiCue = false
+    var streetNames: [String] = []
+    var distanceMeters: Double? = nil
 }
 
 struct DrivingRoute: Identifiable, Equatable, Sendable {
@@ -47,10 +49,13 @@ struct DrivingRoute: Identifiable, Equatable, Sendable {
     let timing: [RouteTimeAnchor]
     let language: String
     let attribution: String
+    let objective: RoutePlanningProfile?
+    let experiment: RouteExperiment?
 
     init(geometry: [GeoPoint], distanceMeters: Double, durationSeconds: Double,
           maneuvers: [RouteManeuver], id: String = UUID().uuidString, timing: [RouteTimeAnchor] = [],
-          language: String = "en-US", attribution: String = "© OpenStreetMap contributors") throws {
+          language: String = "en-US", attribution: String = "© OpenStreetMap contributors",
+          objective: RoutePlanningProfile? = nil, experiment: RouteExperiment? = nil) throws {
         guard geometry.count >= 2, geometry.count <= 100_000, geometry.allSatisfy(\.isValid),
               distanceMeters.isFinite, distanceMeters > 0,
                durationSeconds.isFinite, durationSeconds >= 0, !maneuvers.isEmpty,
@@ -73,6 +78,8 @@ struct DrivingRoute: Identifiable, Equatable, Sendable {
         self.timing = timing
         self.language = language
         self.attribution = attribution
+        self.objective = objective
+        self.experiment = experiment
     }
 
     func elapsedSeconds(at meters: Double) -> Double {
@@ -97,13 +104,67 @@ struct RouteRequest: Sendable {
     let destination: GeoPoint
     let preferences: RoutePreferences
     var originHeading: Double? = nil
+    var objective: RoutePlanningProfile = .fastest
+    var maxExtraDurationPercent: Int = 30
+}
+
+struct RouteExperiment: Codable, Equatable, Sendable {
+    let requestedObjective: String
+    let effectiveObjective: String
+    let status: String
+    let method: String
+    let baselineDurationSeconds: Double
+    let extraDurationPercent: Double
+    let detourLimitPercent: Int
+    let bendCount: Int
+    let bendsPerKilometer: Double
+    let countrysideShare: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case requestedObjective, effectiveObjective, status, method, baselineDurationSeconds
+        case extraDurationPercent, detourLimitPercent, bendCount, bendsPerKilometer, countrysideShare
+    }
+
+    // Lenient: experimental metadata may evolve server-side without breaking a
+    // working route. Missing or mistyped fields fall back to neutral values.
+    init(from decoder: Decoder) throws {
+        let container = try? decoder.container(keyedBy: CodingKeys.self)
+        requestedObjective = Self.string(container, .requestedObjective)
+        effectiveObjective = Self.string(container, .effectiveObjective)
+        status = Self.string(container, .status)
+        method = Self.string(container, .method)
+        baselineDurationSeconds = Self.number(container, .baselineDurationSeconds)
+        extraDurationPercent = Self.number(container, .extraDurationPercent)
+        detourLimitPercent = Int(Self.number(container, .detourLimitPercent))
+        bendCount = Int(Self.number(container, .bendCount))
+        bendsPerKilometer = Self.number(container, .bendsPerKilometer)
+        countrysideShare = Self.number(container, .countrysideShare)
+    }
+
+    private static func string(_ container: KeyedDecodingContainer<CodingKeys>?, _ key: CodingKeys) -> String {
+        guard let container, let value = try? container.decode(String.self, forKey: key) else { return "" }
+        return value
+    }
+
+    private static func number(_ container: KeyedDecodingContainer<CodingKeys>?, _ key: CodingKeys) -> Double {
+        guard let container, let value = try? container.decode(Double.self, forKey: key), value.isFinite else { return 0 }
+        return value
+    }
+
+    var fallbackMessage: String? {
+        switch status {
+        case "metadata_unavailable": String(localized: "Road metadata unavailable. Showing Fastest instead of claiming a scenic or winding route.")
+        case "no_improvement": String(localized: "No verified improvement among the candidates within the detour limit. Showing Fastest.")
+        default: nil
+        }
+    }
 }
 
 enum RoutingError: Error, LocalizedError, Equatable {
     case invalidEndpoint, invalidResponse, noRoute, unavailable, http(Int)
     var errorDescription: String? {
         switch self {
-        case .invalidEndpoint: String(localized: "Set the RoadScout API's HTTPS base URL in Settings.")
+        case .invalidEndpoint: String(localized: "Set a supported RoadScout API base URL in Settings.")
         case .invalidResponse: String(localized: "The routing service returned an unusable route.")
         case .noRoute: String(localized: "No driving route found. Check the routing graph's coverage and destination.")
         case .unavailable: String(localized: "Routing is unreachable. Loaded routes remain available; new routes cannot be calculated.")
