@@ -1,5 +1,15 @@
 # Milestones
 
+## NAS deployment workflow · 2026-10-27
+
+Added manual staging/production GitHub Actions deployment on self-hosted Unraid, target concurrency/GitHub environments, commit-tagged local images, NAS-owned configuration and camera mounts, unique Traefik routing, Docker health/Valhalla readiness gates and deployment summaries. Single-container recreation preserves one camera writer per target. Acceptance and setup: `nas-deployment.md`. Shell syntax, YAML parsing, Compose v2 rendering and simulated success/build/health/readiness failure paths passed. Real NAS container deployment, public HTTPS and route checks remain pending.
+
+## Mounted-phone motion and reroute recovery · 2026-10-27
+
+Added a bounded GPS/speed + Core Motion complementary estimator, calibrated north-reference acceleration and gravity-axis gyro, handling/magnetic fallback, 30 Hz target map presentation, smooth correction, stationary hold and a two-second prediction limit. Arrow/follow-camera now share the display pose inside an isolated map view; navigation, GPS speed and camera warnings retain measured fixes. Existing automatic first-route rerouting is verified with multiple alternatives; pending reroutes cancel on real recovery and cannot resurrect ended navigation. Acceptance was recorded first in `driving-motion.md`.
+
+Debug full tests passed (143 methods: 139 passed, 4 opt-in live skips; 169 passed parameterized executions), Release simulator build passed, and a synthetic 1 Hz GPS/50 Hz motion driving screen was inspected. Mounted-iPhone sensor orientation/calibration, handling thresholds, energy, motion smoothness and missed-turn road acceptance remain pending.
+
 ## Phase 4 planning weather · 2026-10-25
 
 Implemented Go route tokens, bounded 15-minute memory caches, full-route sampling (max 400), Open-Meteo batching, ETA-aligned precipitation/probability, recommendations and rain-segment geometry. iOS automatically checks every alternative, presents weather in route cards, shows selected-route rain on the planning map, and provides a setting/attribution. Missing samples yield unavailable; provider intervals end at their timestamps. Weather stops on entering driving.

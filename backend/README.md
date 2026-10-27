@@ -20,6 +20,8 @@ For current iPhone LAN prototype testing, run `ENABLE_EXPERIMENTAL_ROUTING=1 VAL
 
 ## Deploy on the NAS
 
+For automated staging/production deployment, use the GitHub Actions **Deploy on NAS** workflow. Set up the runner and NAS-side environment files using [`../docs/nas-deployment.md`](../docs/nas-deployment.md) and [`../deploy/nas.env.example`](../deploy/nas.env.example). It uses a separate `compose.nas.yaml`, target-specific Traefik names, persistent camera storage and no published host port. The commands below are the existing manual/LAN deployment option; stop that API project before migrating to the workflow.
+
 From the repository root, set the name of the **existing user-defined Docker network** containing the Valhalla container/alias `Valhalla`:
 
 ```sh

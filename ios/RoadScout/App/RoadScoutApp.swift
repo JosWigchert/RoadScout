@@ -7,6 +7,8 @@ struct RoadScoutApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--search-preview") {
                 PlaceSearchFlowPreview()
+            } else if ProcessInfo.processInfo.arguments.contains("--motion-preview") {
+                DrivingMotionPreview()
             } else if ProcessInfo.processInfo.arguments.contains("--camera-warning-preview") {
                 CameraDrivingPreview()
             } else if ProcessInfo.processInfo.arguments.contains("--average-zone-preview") {

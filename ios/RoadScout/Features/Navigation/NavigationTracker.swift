@@ -8,6 +8,7 @@ struct NavigationProgress: Equatable {
     let maneuverDistance: Double
     let offRoute: Bool
     let arrived: Bool
+    var onRoute: Bool = true
 }
 
 protocol NavigationTracking {
@@ -66,7 +67,7 @@ struct NavigationTracker: NavigationTracking {
         return NavigationProgress(traveledMeters: progressMeters, remainingMeters: route.distanceMeters * ratio,
                                   remainingSeconds: max(0, route.durationSeconds - route.elapsedSeconds(at: progressMeters)),
                                   maneuverIndex: next, maneuverDistance: max(0, route.cumulativeMeters[route.maneuvers[next].beginIndex] - progressMeters),
-                                  offRoute: offRoute, arrived: arrivalCount >= 2)
+                                   offRoute: offRoute, arrived: arrivalCount >= 2, onRoute: !outside)
     }
 
     static func project(_ p: GeoPoint, _ a: GeoPoint, _ b: GeoPoint) -> (fraction: Double, distance: Double) {

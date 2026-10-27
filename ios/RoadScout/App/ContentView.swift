@@ -23,7 +23,6 @@ struct ContentView: View {
     @State private var lastMapCamera: MapCamera?
     @State private var previewDestinationOnFix = false
     @State private var startNavigationOnFix = false
-    @State private var headingPresentation = DrivingHeadingPresentation()
     @State private var source: DrivingSource = .live
     @State private var showingSettings = false
     @State private var showingRouteInfo = false
@@ -79,9 +78,6 @@ struct ContentView: View {
         routePlanner.apply(options: routeCatalog.options)
         _drawerDetent = State(initialValue: initialDestination == nil ? DrawerDetent(presentationDetent: initialDrawerDetent) : (routePlanner.isEditingOrigin ? .expanded : .half))
         _source = State(initialValue: model.source)
-        var heading = DrivingHeadingPresentation()
-        heading.updateHeading(model.heading, at: Date())
-        _headingPresentation = State(initialValue: heading)
         if let fix = model.fix {
             _camera = State(initialValue: .camera(MapCamera(centerCoordinate: fix.coordinate,
                                                            distance: 650, heading: model.heading, pitch: 45)))
@@ -98,7 +94,14 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
-                Map(position: $camera) {
+                DrivingMapSurface(position: $camera, following: $following, driving: model.isDriving,
+                    motion: model.motion, fix: model.fix, source: model.source, fallbackHeading: model.heading,
+                    cameraEnded: { context in
+                        lastMapCamera = context.camera
+                        cameraBounds = CameraViewportQuery.viewport(center: GeoPoint(latitude: context.region.center.latitude,
+                            longitude: context.region.center.longitude), latitudeDelta: context.region.span.latitudeDelta,
+                            longitudeDelta: context.region.span.longitudeDelta)
+                    }) {
                     if !model.isDriving {
                         ForEach(navigation.routes.filter { $0.id != navigation.selectedRoute?.id }) { route in
                             MapPolyline(coordinates: route.geometry.map(\.coordinate))
@@ -153,26 +156,6 @@ struct ContentView: View {
                         }
                         .annotationTitles(.hidden)
                     }
-                    if let fix = model.fix {
-                        Annotation(model.source != .live ? String(localized: "Simulated position") : String(localized: "Your position"),
-                                   coordinate: fix.coordinate, anchor: .center) {
-                            DrivingPositionArrow(rotation: headingPresentation.arrowRotation)
-                        }
-                        .annotationTitles(.hidden)
-                    }
-                }
-                .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
-                .mapControls { MapCompass(); MapScaleView() }
-                .onMapCameraChange(frequency: .continuous) { context in
-                    lastMapCamera = context.camera
-                    var transaction = Transaction(animation: nil)
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { headingPresentation.updateMapHeading(context.camera.heading) }
-                }
-                .onMapCameraChange(frequency: .onEnd) { context in
-                    cameraBounds = CameraViewportQuery.viewport(center: GeoPoint(latitude: context.region.center.latitude,
-                        longitude: context.region.center.longitude), latitudeDelta: context.region.span.latitudeDelta,
-                        longitudeDelta: context.region.span.longitudeDelta)
                 }
                 .ignoresSafeArea()
 
@@ -213,6 +196,7 @@ struct ContentView: View {
                     navigation.refreshFromGPS(fix)
                 }
             }
+            .onChange(of: model.source) { _, value in source = value }
             .onChange(of: navigation.selectedRoute) { _, _ in
                 drivingSpeech.cancelCameraWarnings()
                 cameraAlerts.stop()
@@ -245,13 +229,11 @@ struct ContentView: View {
                 weather.clear()
                 if enabled, !model.isDriving { weather.loadAll(routes: navigation.routes, endpoint: apiURL) }
             }
-            .onChange(of: model.heading) { _, _ in updateCamera() }
             .onChange(of: model.isDriving) { _, driving in
                 UIApplication.shared.isIdleTimerDisabled = driving
                 searchFocused = false
                 if driving {
                     weather.clear()
-                    headingPresentation.resetHeading(model.heading, at: Date())
                     following = true
                     search.cancel()
                     originSearch.cancel()
@@ -480,6 +462,7 @@ struct ContentView: View {
     }
 
     private func zoom(to cluster: CameraCluster) {
+        following = false
         let rect = cluster.bounds.mapRect
         let padding = max(200, max(rect.width, rect.height) * 0.35)
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
@@ -547,14 +530,13 @@ struct ContentView: View {
     }
 
     private func updateCamera() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
-            headingPresentation.updateHeading(model.heading, at: Date())
-        }
+        // DrivingMapSurface owns the frame-driven follow camera.
+        guard !model.isDriving else { return }
         guard following, let fix = model.fix else { return }
         let nextCamera = MapCameraPosition.camera(MapCamera(centerCoordinate: fix.coordinate,
-            distance: model.isDriving ? 650 : cameraDistance,
-            heading: model.isDriving ? headingPresentation.cameraHeading : 0,
-            pitch: model.isDriving ? 45 : 0))
+            distance: cameraDistance,
+            heading: 0,
+            pitch: 0))
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
             camera = nextCamera
         }

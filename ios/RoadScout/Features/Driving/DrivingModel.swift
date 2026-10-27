@@ -30,6 +30,7 @@ enum DrivingStatus {
 
 @MainActor @Observable
 final class DrivingModel {
+    let motion: DrivingMotionModel
     private(set) var isDriving = false
     private(set) var fix: LocationFix?
     private(set) var heading: Double = 0
@@ -50,9 +51,10 @@ final class DrivingModel {
         case .replay: try ReplayLocationProvider.bundled()
         case .navigationReplay: try ReplayLocationProvider.navigationDemo()
         }
-    }, now: @escaping () -> Date = Date.init) {
+    }, now: @escaping () -> Date = Date.init, motion: DrivingMotionModel = DrivingMotionModel()) {
         self.makeProvider = makeProvider
         self.now = now
+        self.motion = motion
     }
 
     func start(source: DrivingSource) {
@@ -62,6 +64,7 @@ final class DrivingModel {
             let provider = try makeProvider(source)
             self.provider = provider
             isDriving = true
+            motion.start(live: source == .live)
             status = .acquiring
             let token = session
             provider.onEvent = { [weak self] event in
@@ -84,6 +87,7 @@ final class DrivingModel {
     }
 
     func stop() {
+        motion.stop()
         session = UUID()
         provider?.onEvent = nil
         provider?.stop()
@@ -130,6 +134,7 @@ final class DrivingModel {
             processor.ingest(newFix, now: now())
             metersPerSecond = processor.metersPerSecond
             if newFix.hasUsablePosition(at: now()) {
+                motion.ingest(newFix)
                 fix = newFix
                 if newFix.course.isFinite, (0..<360).contains(newFix.course), newFix.speed > 2 {
                     heading = newFix.course

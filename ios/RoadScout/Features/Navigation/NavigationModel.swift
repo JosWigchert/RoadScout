@@ -20,6 +20,7 @@ import Observation
     @ObservationIgnored private var token = UUID()
     @ObservationIgnored private var lastReroute: Date?
     @ObservationIgnored private var rerouteDelay: TimeInterval = 15
+    @ObservationIgnored private var rerouteInFlight = false
     @ObservationIgnored private var announced: Set<String> = []
     @ObservationIgnored private var lastSpokenAt: Date?
     @ObservationIgnored private var endpoint = ""
@@ -197,6 +198,7 @@ import Observation
         guard let update = tracker?.update(fix, at: now()) else { return }
         progress = update
         if update.arrived {
+            cancelRequest()
             isNavigating = false; isPaused = false
             message = String(localized: "You have arrived")
             if !muted { audio.speak(route.maneuvers.last!.spokenInstruction, language: route.language) }
@@ -208,6 +210,10 @@ import Observation
                 lastReroute = now(); calculate(fix: fix, rerouting: true)
             }
             return
+        }
+        if rerouteInFlight, update.onRoute {
+            // A confirmed return to the loaded route supersedes the pending detour.
+            cancelRequest()
         }
         if !isLoading { message = nil }
         let maneuver = route.maneuvers[update.maneuverIndex]
@@ -243,6 +249,7 @@ import Observation
     private func calculate(origin: GeoPoint, heading: Double?, rerouting: Bool) {
         guard let destination else { return }
         cancelRequest(); isLoading = true; message = rerouting ? message : nil
+        rerouteInFlight = rerouting
         let current = token
         let request = RouteRequest(origin: origin, destination: destination.point,
                                    preferences: preferences, originHeading: heading,
@@ -255,10 +262,12 @@ import Observation
                 guard let self, token == current else { return }
                 guard !result.isEmpty else { throw RoutingError.noRoute }
                 routes = result; selectedRoute = result[0]; progress = nil; tracker = NavigationTracker(route: result[0])
+                rerouteInFlight = false
                 isLoading = false; message = nil; rerouteDelay = 15; announced = []
             } catch {
                 guard let self, token == current else { return }
                 isLoading = false
+                rerouteInFlight = false
                 if error is CancellationError { return }
                 message = error.localizedDescription
                 if rerouting { rerouteDelay = min(120, rerouteDelay * 2) }
@@ -266,7 +275,7 @@ import Observation
         }
     }
 
-    private func cancelRequest() { token = UUID(); task?.cancel(); task = nil; isLoading = false }
+    private func cancelRequest() { token = UUID(); task?.cancel(); task = nil; isLoading = false; rerouteInFlight = false }
 
     // Heading smoother integration helpers.
     func setHeadingSmoother(_ smoother: HeadingSmoother?) { headingSmoother = smoother }

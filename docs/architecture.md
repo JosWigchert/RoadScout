@@ -1,5 +1,11 @@
 # Architecture
 
+## Driving motion presentation
+
+`DrivingModel` owns an injected `DrivingMotionModel` for each session. The latter coordinates `DrivingMotionProviding`, `DrivingFrameClock` and the pure `DrivingMotionEstimator`. The live adapter uses Core Motion device-motion fusion and calibrated true-north acceleration where available; otherwise gravity-axis gyro and GPS prediction remain available. Estimation uses monotonic time with explicit CLLocation age mapping, bounded inertial influence and a two-second prediction horizon.
+
+`DrivingPose` is a display estimate, deliberately separate from `LocationFix`. Only `DrivingMapSurface` observes its high-frequency changes; it owns the driving camera and arrow/map-heading compensation. Validated location events still feed navigation, GPS speed and camera evaluation. No route snap hides missed turns, and changing a selected route does not reset the motion estimator. `NavigationModel` adopts the first reroute result and cancels obsolete reroutes on recovery/end/pause/arrival. See `driving-motion.md`.
+
 ## Planning weather (Phase 4)
 
 Go `weather.go` owns route-token registration, bounded memory stores, sampling/timing, recommendation and `/v1/weather`. `weather_provider.go` isolates Open-Meteo batching, UTC interval alignment and units behind a provider interface; worst-of-both merging is ready for a future KNMI adapter. Route/readiness behavior is independent of weather availability. Missing samples cannot produce a Roof Down recommendation.

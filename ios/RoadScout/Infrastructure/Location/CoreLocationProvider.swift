@@ -65,7 +65,8 @@ final class CoreLocationProvider: NSObject, LocationProviding, @preconcurrency C
                                 longitude: location.coordinate.longitude,
                                 speed: location.speed, speedAccuracy: location.speedAccuracy,
                                 horizontalAccuracy: location.horizontalAccuracy,
-                                course: location.course, timestamp: location.timestamp)))
+                                course: location.course, timestamp: location.timestamp,
+                                courseAccuracy: location.courseAccuracy)))
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {

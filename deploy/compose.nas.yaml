@@ -1,0 +1,51 @@
+services:
+  routing-api:
+    image: roadscout-api:${DEPLOY_TARGET:?Set deployment target}-${RELEASE_ID:?Set release ID}
+    build: ../backend
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - ${NAS_ENV_FILE:?Set absolute NAS environment file path}
+    environment:
+      LISTEN_ADDR: :8080
+      ROUTING_PROVIDER: valhalla
+      CAMERA_DATA_DIR: /data/cameras
+    volumes:
+      - type: bind
+        source: ${CAMERA_DATA_HOST_DIR:?Set persistent camera directory}
+        target: /data/cameras
+        bind:
+          create_host_path: false
+    networks:
+      - valhalla
+      - traefik
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-home}
+      - traefik.http.routers.roadscout-${DEPLOY_TARGET}.rule=Host(`${ROUTING_HOST:?Set API HTTPS hostname}`)
+      - traefik.http.routers.roadscout-${DEPLOY_TARGET}.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.roadscout-${DEPLOY_TARGET}.tls=true
+      - traefik.http.routers.roadscout-${DEPLOY_TARGET}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.routers.roadscout-${DEPLOY_TARGET}.service=roadscout-${DEPLOY_TARGET}
+      - traefik.http.routers.roadscout-${DEPLOY_TARGET}.middlewares=roadscout-${DEPLOY_TARGET}-rate,roadscout-${DEPLOY_TARGET}-body
+      - traefik.http.services.roadscout-${DEPLOY_TARGET}.loadbalancer.server.port=8080
+      - traefik.http.services.roadscout-${DEPLOY_TARGET}.loadbalancer.healthcheck.path=/readyz
+      - traefik.http.services.roadscout-${DEPLOY_TARGET}.loadbalancer.healthcheck.interval=10s
+      - traefik.http.services.roadscout-${DEPLOY_TARGET}.loadbalancer.healthcheck.timeout=5s
+      - traefik.http.middlewares.roadscout-${DEPLOY_TARGET}-rate.ratelimit.average=2
+      - traefik.http.middlewares.roadscout-${DEPLOY_TARGET}-rate.ratelimit.burst=5
+      - traefik.http.middlewares.roadscout-${DEPLOY_TARGET}-body.buffering.maxRequestBodyBytes=256000
+      - com.roadscout.environment=${DEPLOY_TARGET}
+      - com.roadscout.release=${RELEASE_ID}
+networks:
+  valhalla:
+    external: true
+    name: ${VALHALLA_NETWORK:?Set existing Valhalla Docker network}
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-home}

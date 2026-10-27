@@ -1,5 +1,23 @@
 # Testing
 
+## NAS deployment automation · 2026-10-27
+
+Acceptance was recorded before implementation in `nas-deployment.md`.
+
+- `sh -n scripts/deploy-nas.sh` and `git diff --check` passed.
+- Ruby YAML parsing verified workflow dispatch targets, self-hosted/Unraid runner selection and non-cancelling target concurrency.
+- Standalone Docker Compose **2.40.3** rendered `deploy/compose.nas.yaml` with `deploy/nas.env.example`. JSON assertions verified interpolated target-specific Traefik label keys, commit image tag, camera path, read-only filesystem, external networks and absent host ports.
+- A temporary Docker-command shim used real Compose rendering and simulated mutation commands. Both staging/production success paths passed; build failure, container health failure, upstream readiness failure, invalid target, relative/missing environment path and invalid image-tag release ID all failed as expected.
+- This Mac lacks the `docker compose` plugin; the standalone `docker-compose` executable was used for configuration checks. The NAS runner must provide the documented Compose v2 plugin and Python 3. No real container build/replacement or public HTTPS test was performed for this change. Run the workflow and public health/readiness/route checks to close those gates.
+
+## Mounted-phone motion · 2026-10-27
+
+Preimplementation acceptance is in `driving-motion.md`. Full Debug simulator build/test passed: 143 methods, 139 passed, 4 opt-in live skips; 169 passed parameterized executions, zero failures. Release simulator build passed. New deterministic coverage includes 30-frame movement with sparse fixes, acceleration/braking, cross-track acceleration rejection, tilted-phone coordinate transformation and magnetic gating, north-crossing gyro turns, stationary hold, handling and sensor dropout, two-second freeze, continuous GPS correction, outlier/relocation confirmation, timestamp/accuracy validation, dateline crossing, lifecycle and stale callbacks, and separation of predicted poses from measured fixes/speed.
+
+Navigation regression coverage verifies automatic selection of the first of multiple returned routes, objective/budget/avoidance/current-origin preservation, cancellation after recovery, rejection of late responses after End, and retaining an in-flight reroute when an outside-route GPS gap restarts off-route hysteresis. Existing cooldown/backoff/outage tests remain in the full suite.
+
+Debug `--motion-preview` injects synthetic ~50 Hz motion and 1 Hz location into the actual driving UI. The simulator appearance was inspected; a static screenshot does not establish real sensor performance or device frame cadence. Mounted-iPhone driving/handling/magnetic interference/GPS recovery/missed-turn, gestures/recenter, Reduce Motion, sensor shutdown and energy acceptance remain manual gates. No physical-device/road/CarPlay claims.
+
 ## Phase 4 verification · 2026-10-25
 
 Acceptance was documented before implementation in `phase-4.md`. `go test -race -timeout 60s ./...` and `go vet ./...` passed. Full Debug simulator build/test passed: XCResult reports 123 methods (119 passed, 4 opt-in live skips), 149 passed parameterized executions, zero failures. Release simulator build passed.

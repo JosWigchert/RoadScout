@@ -1,5 +1,9 @@
 # Privacy and licenses
 
+## Foreground motion sensors
+
+Live driving uses Apple's Core Motion device-motion API to improve the displayed arrow/camera between location fixes. Gravity-compensated acceleration, rotation and attitude/magnetic-quality readings are processed in memory on the iPhone. No motion samples are uploaded, persisted or added to route/weather/camera requests. The motion provider and display clock stop when driving ends, location access is denied/restricted, or the session backgrounds. Replay/demo sources do not open real motion sensors. `NSMotionUsageDescription` explains this use. Physical-device lifecycle and energy acceptance remain pending.
+
 ## Planning weather · Phase 4
 
 The phone sends a route token and departure time to the configured Go server. Go retains route geometry/timing under that opaque token for 15 minutes and sends sampled coordinates and a forecast time range to Open-Meteo. This is location disclosure to the server/provider even though geometry is not resent by the phone. Server route-token/weather caches are bounded and memory-only; iOS clears weather on drive entry, route replacement or endpoint change. No weather trip history, account, analytics or weather audio is added.

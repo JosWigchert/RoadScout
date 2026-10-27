@@ -172,11 +172,13 @@ struct NavigationTrackerTests {
 @MainActor private final class Clock { var date = epoch }
 private actor TestRouter: RoutingProviding {
     private(set) var calls = 0
+    private(set) var requests: [RouteRequest] = []
     var pending: [CheckedContinuation<[DrivingRoute], Error>] = []
     let failure: Bool
     init(failure: Bool = false) { self.failure = failure }
     func routes(for request: RouteRequest) async throws -> [DrivingRoute] {
         calls += 1
+        requests.append(request)
         if failure { throw RoutingError.unavailable }
         return try await withCheckedThrowingContinuation { pending.append($0) }
     }
@@ -200,13 +202,82 @@ private actor TestRouter: RoutingProviding {
         let replacement = try DrivingRoute(geometry: original.geometry, distanceMeters: original.distanceMeters,
                                             durationSeconds: original.durationSeconds, maneuvers: original.maneuvers,
                                             id: "rerouted", timing: original.timing)
-        await router.finish([replacement])
+        await router.finish([replacement, original])
         await settle { !model.isLoading }
         #expect(model.selectedRoute?.id == "rerouted")
+        #expect(model.routes.count == 2)
         #expect(model.isNavigating)
         clock.date = epoch.addingTimeInterval(5); model.consume(fix(52.0905, seconds: 5))
         #expect(model.progress?.offRoute == false)
         #expect(model.progress?.remainingMeters ?? 0 > 0)
+    }
+    @Test func returnToOriginalRouteCancelsPendingReroute() async throws {
+        let router = TestRouter(), clock = Clock()
+        let model = NavigationModel(audio: TestAudio(), provider: { _ in router }, now: { clock.date })
+        try model.loadDemo(); model.start(fix: fix())
+        let original = model.selectedRoute?.id
+        for seconds in [1.0, 4.0] {
+            clock.date = epoch.addingTimeInterval(seconds)
+            model.consume(fix(52.095, seconds: seconds))
+        }
+        for _ in 0..<100 { if await router.calls > 0 { break }; await Task.yield() }
+        #expect(model.isLoading)
+        clock.date = epoch.addingTimeInterval(5)
+        model.consume(fix(52.0905, seconds: 5))
+        #expect(!model.isLoading)
+        let route = try fixtureRoute()
+        let obsolete = try DrivingRoute(geometry: route.geometry, distanceMeters: route.distanceMeters,
+            durationSeconds: route.durationSeconds, maneuvers: route.maneuvers, id: "obsolete")
+        await router.finish([obsolete])
+        for _ in 0..<20 { await Task.yield() }
+        #expect(model.selectedRoute?.id == original)
+        #expect(model.isNavigating)
+    }
+
+    @Test func signalGapOutsideRouteDoesNotCancelPendingReroute() async throws {
+        let router = TestRouter(), clock = Clock()
+        let model = NavigationModel(audio: TestAudio(), provider: { _ in router }, now: { clock.date })
+        try model.loadDemo(); model.start(fix: fix())
+        for seconds in [1.0, 4.0] {
+            clock.date = epoch.addingTimeInterval(seconds)
+            model.consume(fix(52.095, seconds: seconds))
+        }
+        for _ in 0..<100 { if await router.calls > 0 { break }; await Task.yield() }
+        clock.date = epoch.addingTimeInterval(20)
+        model.consume(fix(52.095, seconds: 20))
+        #expect(model.progress?.offRoute == false) // Hysteresis restarts after a gap.
+        #expect(model.progress?.onRoute == false)
+        #expect(model.isLoading)
+        model.end()
+        await router.finish([try fixtureRoute()])
+    }
+
+    @Test func rerouteRetainsObjectiveBudgetPreferencesAndActualOrigin() async throws {
+        let router = TestRouter(), clock = Clock()
+        let model = NavigationModel(audio: TestAudio(), provider: { _ in router }, now: { clock.date })
+        model.preview(Destination(name: "Test", point: .init(latitude: 52.091, longitude: 5.1216)),
+            fix: fix(), endpoint: "https://example.com", preferences: .init(avoidTolls: true, avoidHighways: true),
+            objective: .moreCorners, maxExtraDurationPercent: 50)
+        for _ in 0..<100 { if await router.calls > 0 { break }; await Task.yield() }
+        await router.finish([try fixtureRoute()])
+        await settle { !model.isLoading }
+        model.start(fix: fix())
+        for seconds in [1.0, 4.0] {
+            clock.date = epoch.addingTimeInterval(seconds)
+            model.consume(fix(52.095, seconds: seconds, course: 90))
+        }
+        for _ in 0..<100 { if await router.calls == 2 { break }; await Task.yield() }
+        let request = try #require(await router.requests.last)
+        #expect(request.objective == .moreCorners)
+        #expect(request.maxExtraDurationPercent == 50)
+        #expect(request.preferences.avoidTolls)
+        #expect(request.preferences.avoidHighways)
+        #expect(request.origin.latitude == 52.095)
+        #expect(request.originHeading != nil)
+        model.end()
+        await router.finish([try fixtureRoute()])
+        for _ in 0..<20 { await Task.yield() }
+        #expect(model.selectedRoute == nil)
     }
     @Test func muteDedupPauseAndResume() throws {
         let clock = Clock(), audio = TestAudio()

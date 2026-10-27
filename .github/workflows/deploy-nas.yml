@@ -1,0 +1,46 @@
+name: Deploy on NAS
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: roadscout-nas-deploy-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.target }}
+    runs-on: [self-hosted, unraid]
+    environment: ${{ inputs.target }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      RELEASE_ID: ${{ github.sha }}
+      NAS_ENV_FILE: ${{ vars.NAS_ENV_FILE }}
+      DEPLOY_TARGET: ${{ inputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deployment script
+        run: sh -n scripts/deploy-nas.sh
+
+      - name: Deploy container
+        id: deploy
+        run: sh scripts/deploy-nas.sh "$DEPLOY_TARGET"
+
+      - name: Record deployment
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          echo "### $DEPLOY_TARGET deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: $DEPLOY_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`$RELEASE_ID\`" >> "$GITHUB_STEP_SUMMARY"

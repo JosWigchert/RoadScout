@@ -50,6 +50,12 @@ Weather data by [Open-Meteo.com](https://open-meteo.com/), CC BY 4.0. The hosted
 
 Verified 2026-10-25: Go race tests/vet, Debug simulator build/full tests, Release build, live weather for all three Utrecht–Amersfoort alternatives, and simulator planning appearance. Physical-device and road weather acceptance remain pending.
 
+## Deploy the backend from GitHub Actions
+
+The manual **Deploy on NAS** workflow deploys staging or production on a self-hosted Unraid runner. It builds the Go container, uses your existing Traefik/Valhalla networks, retains NAS camera storage and checks API health plus Valhalla readiness. Configure the NAS environment files first using [`deploy/nas.env.example`](deploy/nas.env.example). Full runner, hostname, storage and migration instructions: [`docs/nas-deployment.md`](docs/nas-deployment.md).
+
+Locally verified: workflow YAML, Compose rendering, shell syntax and simulated deployment success/failure. Actual NAS deployment/public HTTPS verification remains pending.
+
 ## Layout
 
 - `ios/`: native app and deterministic unit tests.
@@ -102,6 +108,14 @@ The owner brought this Phase 6 **prototype** forward; earlier device/phase accep
 See `docs/phase-6-prototype.md` for the scoring/verification limits. Release's profile picker remains Fastest-only.
 
 ## Free drive (Phase 1)
+
+### Smooth mounted-phone motion
+
+The driving arrow and follow-camera now share a continuously predicted pose, targeting 30 Hz presentation between GPS fixes. GPS speed/course provide the baseline; Core Motion's fused accelerometer/gyroscope/magnetometer readings assist acceleration, braking and turns. Gravity-compensated acceleration is transformed out of phone axes, and magnetic quality gates north-referenced acceleration. Handling or unavailable sensors falls back to GPS-based prediction. Prediction freezes after two seconds without a fresh usable measurement; it is not long-term inertial navigation.
+
+Measured GPS speed, route progress, arrival and camera alerts still use validated location fixes. A confirmed off-route departure automatically requests a Go/Valhalla route and follows the **first returned route**, keeping route style/budget/avoidance preferences. Returning to the loaded route cancels a pending reroute.
+
+Motion readings stay on the phone and stop with the foreground drive. Optimized for a secured mount; physical-device tuning/energy and road acceptance are pending. Debug `--motion-preview` and the **Driving · synthetic sensor fusion** Canvas preview inject 1 Hz location and ~50 Hz motion without real sensors. See [`docs/driving-motion.md`](docs/driving-motion.md) for design and acceptance checks.
 
 Driving has its own animated map mode: the planning sheet/search dismiss, the map moves into closer tilted heading-follow, and equal-size circular speed/limit instruments appear. The speed circle contains only the number in your selected km/h or mph setting. A single bottom card contains maneuver guidance, estimated arrival/remaining time/distance, **End**, sound and route information. End stops the session/GPS and returns to planning. Recenter appears just above the card's top-right edge only after panning away from follow. There is no separate large Stop button or GPS-speed-unavailable banner; unknown speed remains a dash.
 

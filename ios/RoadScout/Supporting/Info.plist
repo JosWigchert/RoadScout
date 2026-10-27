@@ -22,6 +22,8 @@
 	<string>RoadScout uses your location to find nearby places and show distances while searching. During a drive, it shows your GPS speed, position and heading, and follows your selected route.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>RoadScout connects to your self-hosted routing API when it is on your local network to calculate routes.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>RoadScout uses motion sensors during a drive to smooth your displayed position and turns between GPS updates. Motion readings stay on your iPhone.</string>
 #if ROADSCOUT_LOCAL_TESTING
 	<key>NSAppTransportSecurity</key>
 	<dict>
