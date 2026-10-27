@@ -15,6 +15,7 @@ final class CameraAlertModel {
     @ObservationIgnored private let client: any CameraProviding
     @ObservationIgnored private let cache: any CameraCaching
     @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored private let debounce: Duration
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var requestedScope: CameraCacheScope?
@@ -23,8 +24,8 @@ final class CameraAlertModel {
     @ObservationIgnored private var evaluator = CameraAlertEvaluator()
 
     init(client: any CameraProviding = CameraClient(), cache: any CameraCaching = CameraDiskCache(),
-         now: @escaping () -> Date = Date.init) {
-        self.client = client; self.cache = cache; self.now = now
+         now: @escaping () -> Date = Date.init, debounce: Duration = .milliseconds(300)) {
+        self.client = client; self.cache = cache; self.now = now; self.debounce = debounce
     }
 
     func fetch(bounds: CameraBounds, route: DrivingRoute?, endpoint: String) {
@@ -42,8 +43,8 @@ final class CameraAlertModel {
         task?.cancel(); generation += 1
         let current = generation
         requestedScope = scope; requestedAt = now()
-        task = Task { [weak self, client, cache] in
-            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+        task = Task { [weak self, client, cache, debounce] in
+            do { try await Task.sleep(for: debounce) } catch { return }
             guard let self, self.generation == current else { return }
             // Exact scope only: an earlier viewport/route is never treated as coverage of this query.
             let cached = try? await cache.load(scope: scope)

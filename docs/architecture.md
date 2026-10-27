@@ -1,5 +1,11 @@
 # Architecture
 
+## Planning weather (Phase 4)
+
+Go `weather.go` owns route-token registration, bounded memory stores, sampling/timing, recommendation and `/v1/weather`. `weather_provider.go` isolates Open-Meteo batching, UTC interval alignment and units behind a provider interface; worst-of-both merging is ready for a future KNMI adapter. Route/readiness behavior is independent of weather availability. Missing samples cannot produce a Roof Down recommendation.
+
+Swift `Features/Weather` separates wire models, injected transport, observable request/cache state and presentation. `ContentView` loads every alternative when planning routes arrive, clears weather on endpoint changes/drive entry, and renders rain for the selected route only. No weather computation or provider-specific API access lives in views; no driving weather/audio. See `phase-4.md` and `weather-api.yaml`.
+
 One SwiftUI app target, organized by feature and infrastructure responsibility. Keep views thin and inject the location provider into the driving model. Apple frameworks only; no external package dependencies.
 
 ## Driving presentation
@@ -57,3 +63,9 @@ Camera, weather, scenic and CarPlay engines are not implemented in this phase. F
 ## Server-driven route catalog
 
 `/v1/capabilities` is the source of truth for route styles. Go advertises ordered `routingOptions` with `id`, `title`, `experimental` and per-style `detourOptions`, plus aggregate `detourOptions`. `RoutingCatalog` fetches and caches this for the current API URL; `RoutePlanningModel.apply(options:)` reconciles the persisted style/budget against it. Unknown objectives are represented by `RoutePlanningProfile`'s raw string, so new Go styles are usable without an app rebuild. Settings gates experimental styles. On fetch failure the catalog falls back to Fastest only. `RouteExperiment` decoding is intentionally lenient and never invalidates an otherwise valid route.
+
+## Cameras (Phase 3)
+
+`CameraStore` loads the persistent `CAMERA_DATA_DIR/snapshot.json` into an in-memory index. A background sync in the API process checks OSM every six hours, normalizes fixed cameras and connected average-speed geometry, reconciles complete snapshots by stable OSM IDs, writes atomically and retains the last known-good data on failure. `POST /v1/cameras` returns the union of a viewport and optional route corridor; route confirmation uses local Valhalla edge OSM way IDs and is conservative.
+
+On iOS, `CameraClient` is the only camera transport. `CameraAlertModel` owns scoped fetch/cache and route fingerprints; `CameraAlertEvaluator` is pure and decides ahead/behind, direction/road evidence, zone entry and duplicate suppression. `CameraClusterer` limits rendered map items with zoom-aware counted clusters; `CameraMapContent` renders beams/zones/markers and `CameraDetailCard` presents mapped limit/heading. A shared `SpeechAnnouncer` queue lets camera cues wait for navigation speech and drop stale/obsolete warnings.

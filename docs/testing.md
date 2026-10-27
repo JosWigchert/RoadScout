@@ -1,5 +1,17 @@
 # Testing
 
+## Phase 4 verification · 2026-10-25
+
+Acceptance was documented before implementation in `phase-4.md`. `go test -race -timeout 60s ./...` and `go vet ./...` passed. Full Debug simulator build/test passed: XCResult reports 123 methods (119 passed, 4 opt-in live skips), 149 passed parameterized executions, zero failures. Release simulator build passed.
+
+Weather fixtures cover sample timing, full-route coverage/cap, storm-before/after arrival, thresholds, missing data, batching, interval-end boundaries, unit conversion, token/cache expiry, provider merging, endpoint status/readiness isolation, Swift decoding/transport/cancellation and state supersession. Malformed rain geometry now fails decoding instead of disappearing silently. Server-deadline expiry is tested without another request.
+
+The hosted `:8080` Go server was rebuilt/restarted with the existing camera snapshot and experimental-routing configuration preserved. Real Utrecht–Amersfoort routing returned three tokens; each weather request succeeded with Rain Risk, 100% probability, max 4 mm/h and 5/6/7 samples. `/readyz` returned 200. The `--live-corners-preview` planning screenshot was inspected: route-card risk/time/intensity and dashed selected-route geometry/cloud marker are present. This uses a synthetic origin with real routing/weather, not physical GPS or a road test. Screenshot: temporary `roadscout-weather-planning.png`.
+
+Physical-device, road, manual toggle/expiry appearance and broader regional forecast acceptance remain pending. KNMI is not active.
+
+A later live simulator launch also showed **Roof Down · low forecast rain risk**, retrieval time and resolution text, with no rain overlay. The temporary `roadscout-weather-planning.png` was refreshed to this later dry state; the earlier rain screen was inspected before replacement.
+
 ## Larger detour budgets and route-preference regression · acceptance plan
 
 - Add +85% and +100% alongside +15/+30/+50; use one shared list for the picker and persisted-value validation. The API already accepts budgets through 100%.
@@ -286,3 +298,12 @@ Environment: Xcode 27.0 (27A266a), Swift 6 mode, minimum iOS 18; iPhone 17 Pro /
 - Verified `ictool` renders a valid 1024×1024 icon; inspected the rendered image (arrow above the road, readable at small size).
 - Debug and Release simulator builds pass. Built `Assets.car` contains light/dark/tinted icon renditions plus the Icon Composer layers; both Info.plists declare `CFBundleIconName = AppIcon`.
 - Home-screen screenshot capture was not completed because the simulator had no gesture tool available and the app is not on the first page. Icon correctness is verified from the rendered document and compiled asset catalog. Manual Icon Composer editing and physical-device appearance remain unchecked.
+
+## Phase 3 camera awareness · 2026-10-24
+
+- Acceptance plan was written before implementation in `docs/phase-3.md`.
+- Go: `go test -race -timeout 60s ./...` and `go vet ./...` passed. Tests cover OSM normalization, stable IDs, connected/ordered average-speed geometry, incomplete zones, snapshot diff, no-change checks, failed-sync retention, atomic persistence, reload, missing dataset, bbox/corridor union, Valhalla way-ID confirmation and request validation.
+- Live import/serving: 936 cameras and 76 zones (65 verified, 11 incomplete), source `2026-10-24T18:47:19Z`, check/change `2026-10-24T18:49:01Z`. Restarted Go with `CAMERA_DATA_DIR`; `/readyz` passed and `POST /v1/cameras` returned the snapshot with metadata/warnings. Routing remained independent.
+- iOS: default Debug test run passed **99 methods / 128 cases** with 4 live-network skips; `ROADSCOUT_LAN_SMOKE=1` passed **102 methods / 131 cases** with 1 experimental skip. This includes the real `POST /v1/cameras` request and decode.
+- Simulator screenshots inspected: warning strip above the driving dashboard, camera dot/beam, cluster badges with counts, and the clickable camera detail card (mapped limit + heading). Clustering is limited to 120 rendered items; cluster taps zoom into their bounds.
+- Deferred/unverified: average-speed calculation, real-device road behavior, legal review per country, camera activity/completeness, and public HTTPS deployment. Synthetic camera fixtures are labeled as not real enforcement locations.

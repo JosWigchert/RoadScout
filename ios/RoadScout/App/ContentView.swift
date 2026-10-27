@@ -4,6 +4,7 @@ import MapKit
 struct ContentView: View {
     @State private var model = DrivingModel()
     @State private var navigation: NavigationModel
+    @State private var weather = WeatherModel()
     @State private var cameraAlerts: CameraAlertModel
     @State private var drivingSpeech: SpeechAnnouncer
     @State private var cameraBounds: CameraBounds?
@@ -34,6 +35,7 @@ struct ContentView: View {
     @AppStorage("avoidHighways") private var avoidHighways = false
     @AppStorage("includeExperimentalRouting") private var includeExperimentalRouting = false
     @AppStorage("cameraWarningsEnabled") private var camerasEnabled = true
+    @AppStorage("showRoofDownWeather") private var showRoofDownWeather = true
     @AppStorage("cameraAudioEnabled") private var cameraAudioEnabled = true
     @AppStorage("cameraWarningDistance") private var cameraWarningDistance = 500.0
     @Environment(\.scenePhase) private var scenePhase
@@ -62,8 +64,9 @@ struct ContentView: View {
          initialDestination: Destination? = nil, navigationModel: NavigationModel? = nil,
          routePlanner: RoutePlanningModel = RoutePlanningModel(defaults: .standard), originSearchModel: PlaceSearchModel? = nil,
          routeCatalog: RoutingCatalog = RoutingCatalog(), initialFollowing: Bool = true,
-         cameraModel: CameraAlertModel = CameraAlertModel()) {
+         cameraModel: CameraAlertModel = CameraAlertModel(), initialSelectedCamera: CameraRecord? = nil) {
         _model = State(wrappedValue: model)
+        _selectedCamera = State(initialValue: initialSelectedCamera)
         _following = State(initialValue: initialFollowing)
         let speech = SpeechAnnouncer()
         _drivingSpeech = State(wrappedValue: speech)
@@ -112,7 +115,12 @@ struct ContentView: View {
                         CameraMapContent(cameras: cameraAlerts.cameras, zones: cameraAlerts.zones,
                                          bounds: cameraBounds,
                                          selectCamera: { selectedCamera = $0 },
-                                         selectCluster: { zoom(to: $0) })
+                                          selectCluster: { zoom(to: $0) })
+                    }
+                    if !model.isDriving, showRoofDownWeather,
+                       let route = navigation.selectedRoute,
+                       let response = weather.state(for: route).response, response.hasRainRisk {
+                        WeatherMapContent(response: response)
                     }
                     if !model.isDriving, selectedPlace != nil {
                         if let origin = routePlanner.customOrigin {
@@ -171,6 +179,11 @@ struct ContentView: View {
                 VStack(spacing: topOverlaySpacing) {
                     topOverlay
                         .accessibilityElement(children: .contain)
+                    if let selectedCamera {
+                        CameraDetailCard(camera: selectedCamera, unit: unit) { self.selectedCamera = nil }
+                            .padding(.horizontal, topOverlaySpacing)
+                            .transition(.opacity)
+                    }
                     Spacer(minLength: 0)
                     if model.isDriving {
                         drivingControls(compact: geometry.size.width > geometry.size.height)
@@ -222,11 +235,22 @@ struct ContentView: View {
                     camera = .rect(MKPolyline(coordinates: route.geometry.map(\.coordinate), count: route.geometry.count).boundingMapRect)
                 }
             }
+            .onChange(of: navigation.routes) { _, routes in
+                weather.clear()
+                if !model.isDriving, showRoofDownWeather {
+                    weather.loadAll(routes: routes, endpoint: apiURL)
+                }
+            }
+            .onChange(of: showRoofDownWeather) { _, enabled in
+                weather.clear()
+                if enabled, !model.isDriving { weather.loadAll(routes: navigation.routes, endpoint: apiURL) }
+            }
             .onChange(of: model.heading) { _, _ in updateCamera() }
             .onChange(of: model.isDriving) { _, driving in
                 UIApplication.shared.isIdleTimerDisabled = driving
                 searchFocused = false
                 if driving {
+                    weather.clear()
                     headingPresentation.resetHeading(model.heading, at: Date())
                     following = true
                     search.cancel()
@@ -308,18 +332,29 @@ struct ContentView: View {
                 routePlanner.applyCatalog(routingCatalog, includeExperimental: includeExperimentalRouting)
             }
             .onChange(of: apiURL) { _, newValue in
+                weather.clear()
                 cameraAlerts.clear()
                 drivingSpeech.cancelCameraWarnings()
                 routingCatalog.load(endpoint: newValue)
                 refreshCameraData()
             }
             .onChange(of: cameraBounds) { _, _ in if !model.isDriving { refreshCameraData() } }
-            .onChange(of: cameraAlerts.cameras) { _, _ in evaluateCameraWarnings() }
+            .onChange(of: cameraAlerts.cameras) { _, cameras in
+                if let selectedCamera, !cameras.contains(where: { $0.id == selectedCamera.id }) {
+                    self.selectedCamera = nil
+                }
+                evaluateCameraWarnings()
+            }
             .onChange(of: cameraAlerts.zones) { _, _ in evaluateCameraWarnings() }
             .onChange(of: navigation.muted) { _, muted in drivingSpeech.setMuted(muted) }
             .onChange(of: camerasEnabled) { _, enabled in
-                if !enabled { cameraAlerts.clear(); drivingSpeech.cancelCameraWarnings() }
-                else { refreshCameraData() }
+                if !enabled {
+                    selectedCamera = nil
+                    cameraAlerts.clear()
+                    drivingSpeech.cancelCameraWarnings()
+                } else {
+                    refreshCameraData()
+                }
             }
             .onChange(of: cameraAudioEnabled) { _, enabled in
                 if !enabled { drivingSpeech.cancelCameraWarnings() }
@@ -364,7 +399,10 @@ struct ContentView: View {
                 guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(60)) } catch { return }
-                    if scenePhase == .active { refreshCameraData() }
+                    if scenePhase == .active {
+                        refreshCameraData()
+                        weather.expireCachedForecasts()
+                    }
                 }
             }
         }
@@ -439,6 +477,14 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    private func zoom(to cluster: CameraCluster) {
+        let rect = cluster.bounds.mapRect
+        let padding = max(200, max(rect.width, rect.height) * 0.35)
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
+            camera = .rect(rect.insetBy(dx: -padding, dy: -padding))
+        }
     }
 
     private func refreshCameraData() {
@@ -523,6 +569,7 @@ struct ContentView: View {
                 } else {
                     RoutePlanningView(destination: selectedPlace, planner: routePlanner,
                         navigation: navigation, unit: unit,
+                        weather: showRoofDownWeather ? weather : nil,
                         locationMessage: routePlanner.customOrigin == nil ? (planningLocation.isRequesting ? String(localized: "Finding your location…") : planningLocation.message) : nil,
                         editOrigin: editRouteOrigin, editDestination: editRouteDestination,
                         retry: { previewSelectedDestination(force: true) }, drive: driveToSelectedPlace, close: closeDestination)
@@ -876,6 +923,12 @@ struct ContentView: View {
                     }
                     .disabled(!camerasEnabled)
                     Text("Average-speed sections have purple markers/lines. Average-speed measurement is not yet implemented. Audio follows the driving sound control.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Roof Down weather") {
+                    Toggle("Show Roof Down weather", isOn: $showRoofDownWeather)
+                    WeatherAttribution()
+                    Text("Route samples and their estimated passage times are sent through your RoadScout server to Open-Meteo. Weather is shown only while planning.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 CameraDataSettings(metadata: cameraAlerts.metadata, cached: cameraAlerts.isUsingCache,

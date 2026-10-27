@@ -32,7 +32,7 @@ struct CameraModelTests {
     @Test @MainActor func debounceThrottleCacheAndEndpointIsolation() async throws {
         let client = CameraStubClient(), cache = CameraMemoryCache()
         var now = Date()
-        let model = CameraAlertModel(client: client, cache: cache, now: { now })
+        let model = CameraAlertModel(client: client, cache: cache, now: { now }, debounce: .milliseconds(1))
         model.fetch(bounds: bounds, route: nil, endpoint: "https://example.com")
         model.fetch(bounds: bounds, route: nil, endpoint: "https://example.com")
         try await Task.sleep(for: .milliseconds(500))

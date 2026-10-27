@@ -112,6 +112,8 @@ struct RoadScoutRoutingProvider: RoutingProviding {
         let id: String; let summary: Summary; let geometry: Geometry; let legs: [Leg]; let timing: Timing; let language: String
         let objective: String?
         let experiment: RouteExperiment?
+        let weatherToken: String?
+        let weatherExpiresAt: String?
 
         func model(attribution: String) throws -> DrivingRoute {
             guard geometry.encoding == "polyline6", geometry.dimensions == 2, !legs.isEmpty,
@@ -141,7 +143,9 @@ struct RoadScoutRoutingProvider: RoutingProviding {
             return try DrivingRoute(geometry: points, distanceMeters: summary.distanceMeters,
                                     durationSeconds: summary.durationSeconds, maneuvers: maneuvers,
                                     id: id, timing: timing.anchors, language: language, attribution: attribution,
-                                    objective: objective.map(RoutePlanningProfile.init(rawValue:)), experiment: experiment)
+                                    objective: objective.map(RoutePlanningProfile.init(rawValue:)), experiment: experiment,
+                                    weatherToken: weatherToken.flatMap { $0.isEmpty ? nil : $0 },
+                                    weatherExpiresAt: WeatherWireDate.parse(weatherExpiresAt))
         }
     }
 }

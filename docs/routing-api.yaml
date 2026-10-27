@@ -197,6 +197,8 @@ components:
         appliedPreferences: {$ref: '#/components/schemas/Preferences'}
         objective: {type: string, description: Effective objective id; an unchanged/unverified prototype fallback is `fastest`.}
         experiment: {$ref: '#/components/schemas/RouteExperiment'}
+        weatherToken: {type: string, description: Opaque token for POST /v1/weather; no route geometry is resent. Expires after 15 minutes.}
+        weatherExpiresAt: {type: string, format: date-time, description: UTC expiry of the weather route token.}
         geometry:
           type: object
           required: [encoding, dimensions, pointCount, data]

@@ -1,5 +1,11 @@
 # Milestones
 
+## Phase 4 planning weather · 2026-10-25
+
+Implemented Go route tokens, bounded 15-minute memory caches, full-route sampling (max 400), Open-Meteo batching, ETA-aligned precipitation/probability, recommendations and rain-segment geometry. iOS automatically checks every alternative, presents weather in route cards, shows selected-route rain on the planning map, and provides a setting/attribution. Missing samples yield unavailable; provider intervals end at their timestamps. Weather stops on entering driving.
+
+Verified Go race tests/vet; Debug build/full tests (123 methods: 119 passed, 4 opt-in skips; 149 passed parameterized executions); Release build; live weather on all three Utrecht–Amersfoort alternatives (Rain Risk, 100%, maximum 4 mm/h); simulator screenshot inspected. KNMI, physical-device and real-road acceptance remain open. See `phase-4.md`.
+
 ## Bottom driving dashboard and responsive heading · 2026-10-24
 
 Consolidated maneuver/distance, arrival/time/distance and End/sound/info into a bottom card with compact landscape rendering. Removed the large standalone Stop and measured-speed-unavailable banner; recenter appears above the card only when follow is off. End exits the session to planning; route attribution is accessible through information. Tuned display heading to 0.3 s with brief source/camera easing and immediate map compensation to remove stacked lag. Debug full tests (74 methods / 97 cases) and Release full tests (72 / 95) passed, including unchanged live LAN routing checks; navigation/unknown-speed/recenter and free-drive screens were inspected. Actual road/gesture/landscape/accessibility acceptance remains pending.
@@ -50,7 +56,7 @@ Signing refinement: app/test bundle identifiers now use `nl.joswigchert.roadscou
 | 1 · Free drive | Implemented; build, deterministic tests and simulator presentation verified; physical-device acceptance pending |
 | 2 · Go API + Valhalla navigation | Implemented; local Go → NAS Valhalla and simulator transport verified; public deployment/full coverage/device acceptance pending |
 | 3 · Camera alerts | Planned |
-| 4 · Roof Down Mode | Planned |
+| 4 · Roof Down Mode | Planning-only implementation verified in simulator/live API; KNMI and device/road acceptance pending |
 | 5 · Real-world hardening | Planned |
 | 6 · Scenic / Most Corners | Early owner-prioritized candidate-ranking prototype verified; custom/global optimization and field acceptance pending |
 | 7 · Entitled CarPlay | Planned |
@@ -89,3 +95,7 @@ Route styles, titles, experimental flags and detour budgets now come from Go `/v
 ## App icon · 2026-10-24
 
 Added a winding-road Icon Composer app icon with layered SVG assets, plus a 1024 PNG fallback for iOS 18–25 and the AppIcon build setting. Icon Composer/`ictool` rendering and Debug/Release asset compilation verified; manual Icon Composer editing and device appearance remain pending.
+
+## Phase 3 camera awareness · 2026-10-24
+
+Netherlands-only mapped camera awareness now runs through one Go `POST /v1/cameras` endpoint. The persistent snapshot lives in `CAMERA_DATA_DIR`, is bind-mountable for container persistence, and is reconciled by a six-hour in-process sync with atomic last-good retention. Live import produced 936 cameras and 76 average-speed zones (65 verified, 11 incomplete). The app shows clustered/clickable camera markers with directional beams, an above-dashboard warning strip, route-preview data, and camera settings/coverage. Go race tests/vet and Debug tests passed, including a live LAN camera fetch. Average-speed calculation, real-device/road checks and legal review remain pending.

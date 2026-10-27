@@ -214,16 +214,18 @@ type Timing struct {
 	Anchors []Anchor `json:"anchors"`
 }
 type Route struct {
-	ID          string           `json:"id"`
-	Summary     Summary          `json:"summary"`
-	Geometry    Geometry         `json:"geometry"`
-	Waypoints   []Waypoint       `json:"waypoints"`
-	Legs        []Leg            `json:"legs"`
-	Timing      Timing           `json:"timing"`
-	Language    string           `json:"language"`
-	Preferences Preferences      `json:"appliedPreferences"`
-	Objective   string           `json:"objective,omitempty"`
-	Experiment  *RouteExperiment `json:"experiment,omitempty"`
+	ID               string           `json:"id"`
+	Summary          Summary          `json:"summary"`
+	Geometry         Geometry         `json:"geometry"`
+	Waypoints        []Waypoint       `json:"waypoints"`
+	Legs             []Leg            `json:"legs"`
+	Timing           Timing           `json:"timing"`
+	Language         string           `json:"language"`
+	Preferences      Preferences      `json:"appliedPreferences"`
+	Objective        string           `json:"objective,omitempty"`
+	Experiment       *RouteExperiment `json:"experiment,omitempty"`
+	WeatherToken     string           `json:"weatherToken,omitempty"`
+	WeatherExpiresAt *time.Time       `json:"weatherExpiresAt,omitempty"`
 }
 type Warning struct {
 	Code    string `json:"code"`

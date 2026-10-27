@@ -1,5 +1,11 @@
 # Privacy and licenses
 
+## Planning weather · Phase 4
+
+The phone sends a route token and departure time to the configured Go server. Go retains route geometry/timing under that opaque token for 15 minutes and sends sampled coordinates and a forecast time range to Open-Meteo. This is location disclosure to the server/provider even though geometry is not resent by the phone. Server route-token/weather caches are bounded and memory-only; iOS clears weather on drive entry, route replacement or endpoint change. No weather trip history, account, analytics or weather audio is added.
+
+Attribution: **Weather data by Open-Meteo.com**, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Hosted API access has separate non-commercial terms/limits; review distribution eligibility before release. Forecasts are uncertain; regional native/interpolated resolution differs. KNMI is not active and no key is shipped in the app.
+
 No analytics, accounts, trip persistence or custom telemetry. Engaging search or tapping Use my location can request one foreground location for nearby search and straight-line distances, independently of a driving session. A planning fix is kept only in memory, accepted for at most five minutes, and cleared on background/drive entry; collection stops after one fix, failure or timeout. Location is continuously used in memory during an explicit foreground driving session. Stopping or backgrounding ends driving updates. Map display uses Apple's services under Apple's terms. User-selected units are stored locally. Replay uses synthetic coordinates and does not request GPS permission.
 
 Phase 1 requests When In Use location only. Background navigation, audio and locked-device operation require later implementation and physical-device verification. A public privacy policy and data-source license review are required before distribution. No third-party code dependencies are installed.
@@ -11,3 +17,5 @@ Selected destination recents are stored locally (up to ten), including supplied 
 Route planning can send a user-selected starting-place coordinate instead of the physical location to the RoadScout routing service. That coordinate is a planning input, not a simulated GPS fix. Starting navigation uses a new physical driving fix and recalculates from it; editing a starting point does not change the measured position/speed or create trip tracking.
 
 Routing uses OpenStreetMap-derived data under ODbL; the app shows route attribution separately from MapKit's retained attribution. Source graph import timestamps, coverage and image digest need to be recorded by the operator for the Europe deployment. Synthetic demo geometry is explicitly labeled and is not a route from the live engine.
+
+Phase 3 adds Netherlands camera records from OpenStreetMap (ODbL) served by the owner's Go API. The app sends only a bounded map area and optionally the selected route polyline to `POST /v1/cameras`; Go does not log request coordinates or route bodies. The app caches fetched query areas locally with fetch timestamps so brief network loss does not immediately remove warnings. This is not full offline Netherlands coverage. Camera data can reveal enforcement locations; retain ODbL attribution and review country-specific legal restrictions before any distribution beyond the owner. Mapped records are not claims of active enforcement. Average-speed calculation is not implemented and no continuous trip trace is sent to Go for it.

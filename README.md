@@ -40,6 +40,16 @@ TEST_RUNNER_ROADSCOUT_LAN_SMOKE=1 xcodebuild -quiet -project ios/RoadScout.xcode
 
 To include the opt-in prototype route test, also set `TEST_RUNNER_ROADSCOUT_EXPERIMENTAL_SMOKE=1` and run Go with `ENABLE_EXPERIMENTAL_ROUTING=1`.
 
+## Roof Down weather · Phase 4
+
+Directions automatically checks weather for every route alternative when **Settings → Roof Down weather → Show Roof Down weather** is enabled. Cards show Roof Down, Rain Risk (probability, mm/h and encounter time), or Forecast Unavailable. Only the selected route displays dashed rain segments and a rain-cloud marker at the worst location. Weather is planning-only; entering a drive clears weather work and overlays.
+
+The Go API issues a 15-minute token per route, then accepts token + departure-now at `POST /v1/weather`; the phone does not resend geometry. Bounded server caches are memory-only. Open-Meteo provides 15-minute precipitation (converted from mm to mm/h) and hourly probability; their timestamps end the preceding accumulation/probability interval. Native temporal resolution varies by region; forecasts are guidance, not a dry-roof guarantee. Any missing route sample yields Forecast Unavailable. Tokens expire with **Weather expired — recalculate**.
+
+Weather data by [Open-Meteo.com](https://open-meteo.com/), CC BY 4.0. The hosted free API has non-commercial usage terms; review terms/limits before distribution. KNMI integration awaits a server-side key. Contract, sampling and acceptance: [`docs/phase-4.md`](docs/phase-4.md), [`docs/weather-api.yaml`](docs/weather-api.yaml).
+
+Verified 2026-10-25: Go race tests/vet, Debug simulator build/full tests, Release build, live weather for all three Utrecht–Amersfoort alternatives, and simulator planning appearance. Physical-device and road weather acceptance remain pending.
+
 ## Layout
 
 - `ios/`: native app and deterministic unit tests.
@@ -145,7 +155,20 @@ go test -race -timeout 30s ./...
 go vet ./...
 ```
 
-Navigation is foreground-only, ETA/timing are estimates, and speed limits stay unknown. Camera/weather/scenic/CarPlay features remain in later phases. Live NAS integration, graph coverage and physical-device road acceptance must be verified separately; see `docs/testing.md`.
+Navigation is foreground-only, ETA/timing are estimates, and speed limits stay unknown. Weather/scenic/CarPlay features remain in later phases. Live NAS integration, graph coverage and physical-device road acceptance must be verified separately; see `docs/testing.md`.
+
+## Cameras (Phase 3, Netherlands)
+
+Camera data comes **only from the Go API**, through one `POST /v1/cameras` endpoint. The app does not bundle a camera dataset.
+
+- Go keeps a persistent snapshot in `CAMERA_DATA_DIR` (Docker: `/data/cameras`). A background task in the same container checks OpenStreetMap every six hours, reconciles by stable OSM IDs, writes atomically and keeps the last known-good snapshot on failure. Image updates do not erase the bind-mounted folder.
+- The snapshot currently contains **936 mapped cameras** and **76 average-speed zones** (65 with verified connected geometry, 11 incomplete). Coverage is the Netherlands and is explicitly incomplete; mapped records do not confirm active enforcement.
+- The app shows a camera dot with a white ring and a short **direction beam** for known enforcement travel direction. Nearby cameras are grouped into **counted clusters** when the map is dense; tapping a cluster zooms in, and tapping an individual camera opens a card with its mapped limit and heading.
+- A warning strip appears above the driving dashboard. Average-speed zones use purple dashed geometry and start/end markers; average-speed calculation is deferred.
+- Settings → Cameras controls visibility, audio and warning distance, and shows coverage, last check/change/source timestamps, attribution and stale status.
+- Route preview and navigation request cameras for the route corridor; free drive requests a bounded area around the current position. The app caches fetched query areas for network gaps only; it does not claim uncached offline coverage.
+
+Deploy the mount (example Unraid path) with `CAMERA_DATA_HOST_DIR=/mnt/user/appdata/roadscout/cameras`. The host folder must be writable by UID/GID **10001**. See `backend/README.md` and `docs/cameras-api.yaml`.
 
 ## Map-first UI redesign verification · 2026-10-24
 
@@ -169,3 +192,5 @@ xcrun ictool ios/RoadScout/Resources/AppIcon.icon --export-image \
 ```
 
 Then replace `AppIcon-1024.png` in the appiconset. No text is used in the icon; SVG text must be converted to paths.
+
+Route relevance is deliberately conservative. Cameras near the selected route are shown, but a spoken warning requires matching OSM way identity and compatible enforcement direction; otherwise they are marked nearby/uncertain. A live Utrecht–Amersfoort check produced no confirmed records because the available OSM way/direction evidence did not align, so the app would display them without a confident camera announcement.

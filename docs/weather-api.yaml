@@ -1,0 +1,216 @@
+openapi: 3.1.0
+info:
+  title: RoadScout Weather API
+  version: 1.0.0
+  description: |
+    Roof Down route weather for Phase 4. The iOS app first obtains a weather
+    token from `/v1/routes`, then asks `/v1/weather` for that token at a
+    departure time. Route geometry is never resent: Go keeps the encoded
+    polyline6 geometry, duration and timing anchors in a bounded in-memory
+    store for 15 minutes.
+
+    Open-Meteo is the only active provider. The server abstraction is ready for
+    a second regional adapter (for example KNMI) and merges the worse
+    probability/intensity when both cover a sample.
+
+    Resolution limits: intensity comes from Open-Meteo 15-minute precipitation
+    accumulations, converted to mm/h (accumulation × 4). Probability is hourly.
+    A sample is therefore matched to the containing 15-minute precipitation
+    bucket and the containing hourly probability bucket in UTC. Regional
+    15-minute coverage is best in the Netherlands/Central Europe; elsewhere the
+    underlying model grid may be coarser. Missing probability, missing buckets
+    or stale/out-of-range data make a sample unavailable, never dry.
+servers:
+  - url: https://roadscout.joswigchert.nl
+    description: App default; Traefik terminates HTTPS and forwards to Go port 8080.
+  - url: http://192.168.1.111:8080
+    description: NAS LAN; the iPhone uses a Traefik HTTPS hostname instead.
+paths:
+  /v1/weather:
+    post:
+      operationId: routeWeather
+      description: |
+        Evaluates the route behind `routeToken` at `departureAt`. The app sends
+        only the opaque token and the departure time. Weather failure never
+        affects `/healthz`, `/readyz` or `/v1/routes`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WeatherRequest'}
+      responses:
+        '200':
+          description: Weather evaluated. `summary` is omitted only when the recommendation is `unavailable`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WeatherResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '410': {$ref: '#/components/responses/TokenExpired'}
+        '413': {$ref: '#/components/responses/InvalidRequest'}
+        '415': {$ref: '#/components/responses/InvalidRequest'}
+        '429': {$ref: '#/components/responses/InvalidRequest'}
+        '503': {$ref: '#/components/responses/WeatherUnavailable'}
+components:
+  responses:
+    InvalidRequest:
+      description: Malformed body, unknown field, missing token/departure, invalid token shape or invalid timestamp.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    TokenExpired:
+      description: The route token is unknown or older than its 15-minute TTL.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: {type: string, const: weather_token_expired}
+                  message: {type: string}
+    WeatherUnavailable:
+      description: The weather provider could not be reached or returned no usable forecast for the whole route.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: {type: string, const: weather_unavailable}
+                  message: {type: string}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+    WeatherRequest:
+      type: object
+      additionalProperties: false
+      required: [routeToken, departureAt]
+      properties:
+        routeToken:
+          type: string
+          minLength: 16
+          maxLength: 256
+          description: Opaque token from a route in `/v1/routes`. Valid for 15 minutes.
+        departureAt:
+          type: string
+          format: date-time
+          description: RFC 3339 departure time. Stored ETAs are added to this instant.
+    WeatherProvider:
+      type: object
+      required: [id, name, license, attribution, coverage]
+      properties:
+        id: {type: string, const: open-meteo}
+        name: {type: string}
+        license: {type: string, const: CC BY 4.0}
+        attribution: {type: string}
+        coverage: {type: string}
+    WeatherCoordinate:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+    WeatherSummary:
+      type: object
+      description: Worst sample by maximum intensity, then maximum probability.
+      required: [maxProbabilityPercent, maxIntensityMmPerHour, worstAt, worstCoordinate, sampleCount, rainRiskSampleCount]
+      properties:
+        maxProbabilityPercent: {type: integer, minimum: 0, maximum: 100}
+        maxIntensityMmPerHour: {type: number, minimum: 0}
+        worstAt: {type: string, format: date-time}
+        worstCoordinate: {$ref: '#/components/schemas/WeatherCoordinate'}
+        sampleCount: {type: integer, minimum: 1, maximum: 400}
+        rainRiskSampleCount: {type: integer, minimum: 0, maximum: 400}
+    WeatherSegment:
+      type: object
+      description: Contiguous rain-risk samples merged into one route segment.
+      required: [startMeters, endMeters, startAt, endAt, probabilityPercent, intensityMmPerHour, geometry]
+      properties:
+        startMeters: {type: number, minimum: 0, description: Along-route distance of the segment start.}
+        endMeters: {type: number, minimum: 0, description: Along-route distance of the segment end; greater than startMeters.}
+        startAt: {type: string, format: date-time}
+        endAt: {type: string, format: date-time}
+        probabilityPercent: {type: integer, minimum: 0, maximum: 100, description: Maximum probability in the run.}
+        intensityMmPerHour: {type: number, minimum: 0, description: Maximum intensity in the run.}
+        geometry:
+          type: object
+          required: [encoding, data]
+          properties:
+            encoding: {type: string, const: polyline6}
+            data: {type: string, description: Sliced route geometry between startMeters and endMeters.}
+    Warning:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+    WeatherResponse:
+      type: object
+      required: [routeToken, generatedAt, departureAt, expiresAt, provider, recommendation, segments, warnings]
+      properties:
+        routeToken: {type: string}
+        generatedAt: {type: string, format: date-time}
+        departureAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, description: Weather cache expiry (15 minutes, capped by the route token expiry).}
+        provider: {$ref: '#/components/schemas/WeatherProvider'}
+        recommendation:
+          type: string
+          enum: [roof_down, rain_risk, unavailable]
+          description: Any sample with probability ≥30% and intensity ≥0.1 mm/h is rain_risk; otherwise roof_down. Missing/stale data yields unavailable instead of asserting dry.
+        summary: {$ref: '#/components/schemas/WeatherSummary'}
+        segments:
+          type: array
+          description: Empty when there is no rain risk.
+          items: {$ref: '#/components/schemas/WeatherSegment'}
+        warnings:
+          type: array
+          items: {$ref: '#/components/schemas/Warning'}
+    RouteWeatherAdditions:
+      type: object
+      description: |
+        Augments each route object in `/v1/routes` (see routing-api.yaml). Both
+        fields are present whenever the weather service is configured.
+      required: [weatherToken, weatherExpiresAt]
+      properties:
+        weatherToken: {type: string, description: Opaque crypto/rand token; use it as `routeToken` in `/v1/weather`.}
+        weatherExpiresAt: {type: string, format: date-time, description: Token expiry, 15 minutes after the route response.}
+    WeatherCapabilities:
+      type: object
+      description: Returned as `weather` by `/v1/capabilities`.
+      required: [provider, coverage, license, attribution, routeTokenTTLSeconds, cacheTTLSeconds, sampling, rainRisk]
+      properties:
+        provider: {type: string, const: open-meteo}
+        coverage: {type: string}
+        license: {type: string, const: CC BY 4.0}
+        attribution: {type: string}
+        routeTokenTTLSeconds: {type: integer, const: 900}
+        cacheTTLSeconds: {type: integer, const: 900}
+        sampling:
+          type: object
+          required: [distanceMeters, intervalSeconds, maxSamples]
+          properties:
+            distanceMeters: {type: integer, const: 2000}
+            intervalSeconds: {type: integer, const: 300}
+            maxSamples: {type: integer, const: 400}
+        rainRisk:
+          type: object
+          required: [probabilityPercent, intensityMmPerHour]
+          properties:
+            probabilityPercent: {type: integer, const: 30}
+            intensityMmPerHour: {type: number, const: 0.1}

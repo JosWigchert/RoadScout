@@ -1,6 +1,6 @@
-# RoadScout routing and NL camera API · Phases 2–3
+# RoadScout routing, NL camera and Roof Down weather API · Phases 2–4
 
-Small standard-library Go service. No accounts, database, external packages, or per-GPS-update API. Routing provider selection is server-side; only Valhalla is implemented. The app consumes the normalized contract in `../docs/routing-api.yaml`.
+Small standard-library Go service. No accounts, database, external packages, or per-GPS-update API. Routing provider selection is server-side; only Valhalla is implemented. Weather provider selection is server-side; only Open-Meteo is active. The app consumes the normalized contracts in `../docs/routing-api.yaml` and `../docs/weather-api.yaml`.
 
 ## Local development
 
@@ -11,6 +11,8 @@ go test -race -timeout 60s ./...
 go vet ./...
 VALHALLA_BASE_URL=http://192.168.1.111:8002 LISTEN_ADDR=127.0.0.1:8080 go run .
 ```
+
+Weather defaults to `OPEN_METEO_BASE_URL=https://api.open-meteo.com/v1/forecast` and `WEATHER_CACHE_TTL=15m`; no key is required. Both may be overridden for local fixtures or a self-hosted Open-Meteo deployment.
 
 The LAN upstream above is a development override only and requires Valhalla to publish that host port. On the NAS use `http://Valhalla:8002` on its shared Docker network. Default listener is `:8080`; `ROUTING_PROVIDER` is `valhalla`. No secret or TLS key is required in Go: Traefik handles public HTTPS. Release iPhone builds accept HTTPS API URLs only; the temporary Debug build permits the specifically configured Mac LAN HTTP endpoint.
 
@@ -105,6 +107,8 @@ The prewritten Phase 3 acceptance plan is in `../docs/phase-3.md`. Backend-focus
 
 Verified in this implementation session:
 
+- Integration follow-up 2026-10-25: hosted `:8080` was subsequently rebuilt/restarted with the existing camera data and experimental routing preserved. All three live Utrecht–Amersfoort routes returned weather (100%, max 4 mm/h); readiness passed. Final race tests include interval-end alignment and any-missing-sample unavailability; vet passed.
+
 - `go test -race -timeout 60s ./...` passed (final run 6.545 s), including existing routing/prototype tests; `go vet ./...` passed. The final run also followed a conservative fix rejecting graph searches that hit the path-depth bound before uniqueness is established. The Go timeout flag requires `-timeout 60s` or `-timeout=60s`.
 - Built the final standalone binary at `/var/folders/m2/hzwknc_n5b52pswh2kt8mm5w0000gn/T/opencode/roadscout-camera-api`. No existing HTTP process was restarted or replaced.
 - A real NL import into `/var/folders/m2/hzwknc_n5b52pswh2kt8mm5w0000gn/T/opencode/roadscout-camera-import` produced **936 normalized camera records**, **76 average-speed relation records**, **74 verified zones**, and **2 incomplete zones**. Overpass source snapshot: **2026-10-24T18:28:52Z**; saved check/change timestamp: **2026-10-24T18:29:59.943178Z**; version `a4914bfaa06ba1a47e285678d861e0405471a14d30c90ab0a85d793536e56456`. Counts describe that import, not current complete/active NL enforcement coverage.
@@ -127,3 +131,56 @@ One bounded final-code import operation (normal primary/secondary policy, no ret
 - Focused regression command: `go test -race -timeout 60s -run TestCamera ./...` (passed, 1.421 s). The saved-data contract check `CAMERA_SNAPSHOT_CHECK_PATH=<absolute snapshot.json> go test -race -timeout 60s -run TestCameraImportedSnapshotContract -v .` also passed (1.816 s), confirming the persisted counts, full NL bbox response without fabricated route evidence, stable normalized version after reload, and no-change publication/startup-due state. It performs no network fetch, opens no listener, and writes only a disposable test-store copy.
 
 At integration, use the above data directory with the binary and the existing listener/Valhalla/experimental environment settings. A fresh successful check skips startup source work until six hours have elapsed. The temporary path is usable now; for long-term NAS deployment provision the documented writable bind mount and carry the snapshot into it as part of owner-controlled deployment. Root filesystem and UID requirements are unchanged.
+
+## Phase 4 · Roof Down route weather
+
+Contract: [`../docs/weather-api.yaml`](../docs/weather-api.yaml). The locked app wire is preserved: each route in `/v1/routes` gains an opaque `weatherToken` and `weatherExpiresAt`, and `POST /v1/weather` accepts only `{routeToken, departureAt}`. Route geometry is never resent by the app.
+
+### Configuration and lifecycle
+
+- `OPEN_METEO_BASE_URL` defaults to `https://api.open-meteo.com/v1/forecast`; `WEATHER_CACHE_TTL` defaults to `15m`. Both are optional. No API key, account or paid SDK is used. Attribution: "Weather data by Open-Meteo.com" (CC BY 4.0).
+- `WEATHER_CACHE_TTL` is parsed with Go duration syntax and must be positive; an invalid value fails startup.
+- Route tokens use `crypto/rand` and are valid for **15 minutes**. The in-memory token store is bounded (512 entries) and holds only encoded polyline6 geometry, duration and timing anchors. The weather response cache is bounded (1024 entries) and keyed by token plus departure instant; expired entries are evicted lazily.
+- Weather work is isolated from routing: a missing/failing weather provider cannot affect `/healthz`, `/readyz` or `/v1/routes`. Route token registration is in-memory only and cannot fail the route response.
+- No coordinates, route bodies or user/trip identifiers are logged by Go. Responses use `no-store`.
+
+### Sampling and ETA
+
+- Spacing = `max(2 km, 5 min × average speed, route length ÷ 400)`; start and end are always included; total samples are capped at **400** while still covering the whole route (long routes widen spacing, never truncate).
+- ETA uses the route's timing anchors when present, otherwise linear distance interpolation. This matches the iOS route-card estimate (`elapsedSeconds(at:)`).
+- Coordinates are sent to Open-Meteo in batches of at most **50**. Each batch requests `minutely_15=precipitation`, `hourly=precipitation_probability`, `timezone=UTC` and a forecast range sufficient for the route (at most 16 days).
+
+### Recommendation and segments
+
+- A sample is rain risk when probability ≥ **30%** and intensity ≥ **0.1 mm/h**. Any risk sample → `rain_risk`; otherwise `roof_down`.
+- Open-Meteo `minutely_15.precipitation` is an accumulation in mm over 15 minutes; Go converts it to mm/h (× 4) to apply the intensity floor. Probability is hourly, so it is coarser than intensity; both are aligned to the sample ETA in UTC. This resolution difference is intentional and documented, not smoothed into a false precision.
+- A missing probability, a missing/out-of-range precipitation or probability bucket, or any missing sample makes the route recommendation `unavailable` with `summary` omitted. A warning (`weather_samples_missing`) explains partial gaps; Go never asserts dry from incomplete coverage.
+- Provider timestamps end the preceding 15-minute precipitation / hourly probability interval. Alignment uses `(timestamp - interval, timestamp]`, not the following interval.
+- The summary is the worst available sample by maximum intensity, then maximum probability. Contiguous risk samples are merged into segments; segment bounds are the midpoints between risk and non-risk samples (so a single-sample shower still has positive-length geometry), and the route geometry between those bounds is sliced and re-encoded as polyline6.
+- The provider interface already merges multiple providers with a worst-of-both helper (`worstForecast`): when two providers cover a sample, the higher probability and higher intensity win; missing coverage from one provider does not override another provider's usable value. Only Open-Meteo is active; a KNMI adapter can be added without changing the wire contract.
+
+### Endpoint example
+
+```sh
+# Use the weatherToken returned by /v1/routes.
+curl --fail http://127.0.0.1:8080/v1/weather \
+  -H 'Content-Type: application/json' \
+  --data '{"routeToken":"<token>","departureAt":"2026-10-24T12:00:00Z"}'
+```
+
+Status mapping: `400 invalid_request` for malformed/unknown-field/missing input, `410 weather_token_expired` for an unknown or older-than-15-minute token, and `503 weather_unavailable` when the provider cannot be reached or returns no usable forecast for the whole route. `413`/`415`/`429` mirror the other endpoints.
+
+### Acceptance and verification notes
+
+Synthetic tests in `weather_test.go` cover:
+
+- a deterministic storm fixture before vs after the passing time (rain risk with segments vs roof down), a dry route, missing/majority-missing samples → unavailable (summary omitted), timezone conversion, cache expiry, token expiry, sampling spacing/start/end/400 cap, timing-anchor ETA, batching at 50 coordinates, Open-Meteo alignment and units, missing probability/out-of-range times, the worst-of-both merge helper, the full endpoint contract (including capabilities.weather), no geometry resend (unknown `geometry` field rejected), and routing/readiness isolation from weather failure.
+
+Verified in this implementation session:
+
+- `go test -race -timeout 60s ./...` passed (final run 6.603 s); `go vet ./...` passed. The Go timeout flag requires `-timeout 60s` or `-timeout=60s`.
+- A live check used a separately built binary on `127.0.0.1:18080` with a temporary camera directory, the existing Valhalla endpoint and default Open-Meteo settings. The existing server on `:8080` was **not** restarted or replaced.
+- `POST /v1/routes` returned **3 routes**, each with a 64-character weather token and `weatherExpiresAt`. The first route (28,056 m, 1,435 s) then produced `POST /v1/weather` → **200**, recommendation `rain_risk`, **5 samples**, **5 rain-risk samples**, max probability **100%**, max intensity **3.2 mm/h**, worst at `2026-10-24T22:48:24Z` near `52.1247, 5.3468`, and **1 segment** spanning `0–28025.4 m` with polyline6 geometry. No warnings were returned. These counts describe that one live route/forecast, not a claim about current weather or device/road behaviour. A second live run with the final binary on `127.0.0.1:18081` produced the same shape: 3 routes, tokens present, **200**, `rain_risk`, **5 samples**, **5 rain-risk samples**, **1 segment**, max probability **100%**, max intensity **3.2 mm/h**, no warnings.
+- Open-Meteo quirk observed: the live forecast for that route was wet at every sample, so the single segment covered nearly the whole route; probability was hourly (100%) while intensity came from 15-minute accumulation (0.8 mm per 15 minutes → 3.2 mm/h). This is expected from the documented resolution difference.
+
+Deployment note: the weather service is enabled by default in `main`; existing Compose files need no change because the defaults are built in. Adding `OPEN_METEO_BASE_URL` or `WEATHER_CACHE_TTL` to a Compose environment is optional. The owner must restart the existing container to pick up this binary; this session did not do so.

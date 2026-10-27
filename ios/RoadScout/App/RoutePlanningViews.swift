@@ -6,6 +6,7 @@ struct RoutePlanningView: View {
     @Bindable var planner: RoutePlanningModel
     let navigation: NavigationModel
     let unit: SpeedUnit
+    let weather: WeatherModel?
     let locationMessage: String?
     let editOrigin: () -> Void
     let editDestination: () -> Void
@@ -87,6 +88,7 @@ struct RoutePlanningView: View {
                         Text("Arrival times are estimates and do not include live traffic.")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(selected.attribution).font(.caption2).foregroundStyle(.secondary)
+                        if weather != nil { WeatherAttribution() }
                     } else if !navigation.isLoading {
                         Button(action: retry) {
                             Label("Calculate route", systemImage: "arrow.clockwise")
@@ -141,6 +143,7 @@ struct RoutePlanningView: View {
                         Text("≈\(experiment.bendCount) qualifying bends · \(Int(experiment.countrysideShare * 100))% eligible country roads · +\(Int(experiment.extraDurationPercent.rounded()))% time")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if let weather { WeatherRouteLine(state: weather.state(for: route), unit: unit) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())

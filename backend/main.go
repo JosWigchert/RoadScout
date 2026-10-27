@@ -16,9 +16,16 @@ import (
 )
 
 func handler(provider RoutingProvider, cameras ...*cameraService) http.Handler {
+	return handlerWithWeather(provider, cameras, nil)
+}
+
+func handlerWithWeather(provider RoutingProvider, cameras []*cameraService, weather *weatherService) http.Handler {
 	mux := http.NewServeMux()
 	if len(cameras) > 0 {
 		mux.HandleFunc("POST /v1/cameras", cameras[0].serveHTTP)
+	}
+	if weather != nil {
+		mux.HandleFunc("POST /v1/weather", weather.serveHTTP)
 	}
 	write := func(w http.ResponseWriter, status int, v any) {
 		w.Header().Set("Content-Type", "application/json")
@@ -62,6 +69,9 @@ func handler(provider RoutingProvider, cameras ...*cameraService) http.Handler {
 		capabilities := map[string]any{"apiVersion": "1", "profiles": []string{"car"}, "objectives": routingObjectives(provider), "routingOptions": options, "detourOptions": catalogDetourOptions(options), "preferences": []string{"tolls", "motorways", "ferries"}, "preferenceValues": []string{"neutral", "avoid"}, "maxWaypoints": 10, "maxAlternatives": 2, "geometryEncoding": "polyline6", "annotations": []string{}, "timingMethod": "maneuver_interpolation"}
 		if len(cameras) > 0 {
 			capabilities["cameras"] = cameras[0].store.read().Dataset
+		}
+		if weather != nil {
+			capabilities["weather"] = weather.capability()
 		}
 		write(w, 200, capabilities)
 	})
@@ -123,6 +133,15 @@ func handler(provider RoutingProvider, cameras ...*cameraService) http.Handler {
 		if warnings == nil {
 			warnings = []Warning{}
 		}
+		if weather != nil {
+			for i := range routes {
+				token, expiresAt := weather.register(routes[i])
+				if token != "" {
+					routes[i].WeatherToken = token
+					routes[i].WeatherExpiresAt = &expiresAt
+				}
+			}
+		}
 		write(w, 200, RouteResponse{identifier(), time.Now().UTC(), routes, warnings, []string{"© OpenStreetMap contributors — ODbL"}, Provenance{"valhalla", "1", ""}})
 	})
 	return mux
@@ -168,7 +187,24 @@ func main() {
 	if os.Getenv("ENABLE_EXPERIMENTAL_ROUTING") == "1" {
 		router = &experimentalRouter{base: provider, attributes: provider}
 	}
-	srv := &http.Server{Addr: addr, Handler: handler(router, newCameraService(store, provider)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+	openMeteoBase := os.Getenv("OPEN_METEO_BASE_URL")
+	if openMeteoBase == "" {
+		openMeteoBase = "https://api.open-meteo.com/v1/forecast"
+	}
+	weatherCacheTTL := 15 * time.Minute
+	if raw := os.Getenv("WEATHER_CACHE_TTL"); raw != "" {
+		parsed, parseErr := time.ParseDuration(raw)
+		if parseErr != nil || parsed <= 0 {
+			log.Fatal("invalid WEATHER_CACHE_TTL")
+		}
+		weatherCacheTTL = parsed
+	}
+	openMeteo, weatherErr := newOpenMeteo(openMeteoBase)
+	if weatherErr != nil {
+		log.Fatal(weatherErr)
+	}
+	weatherSvc := newWeatherService([]weatherProvider{openMeteo}, weatherCacheTTL, time.Now)
+	srv := &http.Server{Addr: addr, Handler: handlerWithWeather(router, []*cameraService{newCameraService(store, provider)}, weatherSvc), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go store.runSync(ctx, defaultCameraFetcher())

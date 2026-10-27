@@ -26,3 +26,17 @@ Use one speech coordinator for maneuver/camera cues: prioritize imminent navigat
 - Seeded/replayed fixes warn ahead, not behind/opposite direction or an unrelated parallel road with known road evidence. Ambiguous matches suppress speech; duplicates are suppressed; expired GPS cannot advance alerts. Route changes invalidate cached route positions.
 - Cached responses retain coverage/age and do not imply uncached/global coverage. Settings show last check/source/coverage and warning/audio controls.
 - Inspect route-planning markers/zones and the above-dashboard warning strip using explicit synthetic fixtures; build app and run targeted backend/evaluator/cache/audio checks. Never claim real-device/road/CarPlay acceptance from fixtures.
+
+## Verification · 2026-10-24
+
+- Go race tests and vet passed. Camera tests cover import normalization, connected zone ordering, incomplete geometry, stable-ID snapshot diff, no-change checks, failed/partial retention, atomic storage, missing-data behavior, route way-ID confirmation, bbox/corridor union and endpoint validation.
+- Live final-code import: **936 cameras**, **76 average-speed zones** (**65 verified**, **11 incomplete**). Source snapshot `2026-10-24T18:47:19Z`; successful check/change `2026-10-24T18:49:01Z`; dataset not stale at publication. Snapshot persisted in the mounted `CAMERA_DATA_DIR` and served after restart.
+- `POST /v1/cameras` NL bbox returned 936 cameras, 76 zones and 65 verified zones (~829 KB), with the incomplete-zone warning. `/readyz` remained ready and routing stayed independent. `/v1/capabilities` advertises NL camera metadata.
+- App tests: default run **99 methods / 128 cases**, 4 live-network skips, zero failures. With `ROADSCOUT_LAN_SMOKE=1`: **102 methods / 131 cases**, 1 experimental skip, zero failures, including the real single-endpoint camera fetch.
+- Simulator inspection: camera dot with white ring and directional beam; above-dashboard warning strip with mapped limit; zoom-aware cluster badges with counts; clickable detail card showing mapped limit and heading. Fixtures are synthetic, not real enforcement locations.
+- The sync runs in the API process every six hours, retries hourly after failure, and keeps last-known-good data. Docker persists the host-mounted folder across image updates; the container root filesystem remains read-only while the camera mount is writable by UID/GID 10001.
+- Not verified: physical-device GPS/road behavior, legal review per jurisdiction, actual camera-data completeness/activity, average-speed calculation (deferred), and real iOS ↔ public HTTPS deployment.
+
+### Route confirmation note
+
+Live route-corridor checks (Utrecht ↔ Amersfoort) returned 104 viewport records and 3/1 corridor-near records, with **0 `confirmed`** for those directions. The nearby records either lacked OSM way identity, sat on a different/opposite carriageway way, or had an incompatible enforcement bearing. This is the intended conservative behavior: cameras remain visible on the route map, but speech requires matching OSM way identity plus direction evidence. It does not indicate that no cameras exist on the route; it reflects available OSM attribution. No false confirmation was forced.

@@ -16,16 +16,14 @@ struct CameraMapContent: MapContent {
                 .stroke(.purple.opacity(zone.routeMatch == "confirmed" ? 0.9 : 0.45),
                         style: StrokeStyle(lineWidth: 5, dash: [8, 6]))
         }
-        ForEach(cameras) { camera in
-            if let cone = CameraHeadingCone.coordinates(for: camera) {
-                MapPolygon(coordinates: cone)
-                    .foregroundStyle(.blue.opacity(camera.routeMatch == "confirmed" ? 0.30 : 0.16))
-                    .stroke(.blue.opacity(0.55), lineWidth: 1)
-            }
-        }
         ForEach(items) { item in
             switch item {
             case .camera(let camera):
+                if let cone = CameraHeadingCone.coordinates(for: camera) {
+                    MapPolygon(coordinates: cone)
+                        .foregroundStyle(.blue.opacity(camera.routeMatch == "confirmed" ? 0.30 : 0.16))
+                        .stroke(.blue.opacity(0.55), lineWidth: 1)
+                }
                 Annotation(camera.name ?? String(localized: "Mapped camera"),
                            coordinate: camera.coordinate.coordinate) {
                     Button { selectCamera(camera) } label: {

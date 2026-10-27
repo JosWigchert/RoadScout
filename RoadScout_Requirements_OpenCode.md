@@ -12,6 +12,8 @@
 
 ## 1. Product vision
 
+**Owner-approved Phase 4 amendment · 2026-10-25:** use Open-Meteo through Go instead of WeatherKit; add KNMI only when a server-side key is available. Weather is planning-only, automatically requested for every alternative using a 15-minute route token and departure now. Use Roof Down / Rain Risk / Forecast Unavailable, fixed thresholds of probability ≥30% AND intensity ≥0.1 mm/h, and selected-route rain overlays. No driving/free-drive weather or weather audio in this phase. This supersedes the initial provider, adjustable-threshold, progress-refresh and audio scope below. See `docs/phase-4.md`.
+
 Build a reliable, attractive navigation and driving companion app that can eventually replace Flitsmeister for its owner and later be distributed publicly. Its differentiators are:
 
 1. **Always visible GPS speed and speed camera alerts**, whether or not a destination is set.
@@ -29,7 +31,7 @@ Essential driving/navigation features should remain usable for free. Favor free 
 - **Navigation engine:** implemented in Swift, consuming Valhalla guidance and geometry.
 - **MVP backend (owner amendment, 2026-10-23):** a small Go `net/http` routing API in Phase 2 normalizes the configured engine into a versioned RoadScout contract. Valhalla remains the initial and only implemented route engine. No user accounts or central community database. Swift consumes RoadScout geometry/guidance; engine-specific JSON stays in Go.
 - **Future services:** Go (`net/http`), self-hosted through Docker on Unraid, exposed over HTTPS through existing Traefik. Postgres/PostGIS only when justified.
-- **Weather:** Apple WeatherKit as the initial worldwide provider if developer entitlement/account and actual usage terms permit; weather provider interface must allow replacement. Self-hosted Open-Meteo and regional radar sources (KNMI, etc.) are later options.
+- **Weather (owner amendment):** Open-Meteo through Go initially, behind a replaceable provider interface. KNMI radar later with a server-side key; WeatherKit is not required. Phase 4 is planning-only; see the amendment above.
 - **Worldwide product:** no Netherlands-only assumptions in UI, units, routing or weather. Initially optimize/import camera datasets for the Netherlands, and make country coverage explicitly visible to the user.
 - **CarPlay:** planned from the start architecturally, but not a blocker for iPhone MVP. Native CarPlay navigation requires Apple's relevant entitlement and platform compliance.
 - **No paid third-party SDK dependency.** Apple's included system SDKs are allowed. Observe OSM, weather-provider and dataset licenses and attributions.

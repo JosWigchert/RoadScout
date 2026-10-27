@@ -11,6 +11,10 @@ struct RoadScoutApp: App {
                 CameraDrivingPreview()
             } else if ProcessInfo.processInfo.arguments.contains("--average-zone-preview") {
                 CameraDrivingPreview(averageZone: true)
+            } else if ProcessInfo.processInfo.arguments.contains("--camera-cluster-preview") {
+                CameraDrivingPreview(cluster: true)
+            } else if ProcessInfo.processInfo.arguments.contains("--camera-detail-preview") {
+                CameraDrivingPreview(detail: true)
             } else if ProcessInfo.processInfo.arguments.contains("--driving-dashboard-preview") {
                 ContentView.navigationDashboardPreview(
                     unavailableSpeed: ProcessInfo.processInfo.arguments.contains("--missing-speed"),
