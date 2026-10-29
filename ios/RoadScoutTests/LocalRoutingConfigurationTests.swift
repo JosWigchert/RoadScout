@@ -6,9 +6,10 @@ struct LocalRoutingConfigurationTests {
     @Test func defaultAndSavedEndpointMigrationFollowBuildConfiguration() {
         #expect(AppConfiguration.migratedRoutingAPIURL("") == AppConfiguration.routingAPIBaseURL)
         #expect(AppConfiguration.migratedRoutingAPIURL("https://custom.example.com") == "https://custom.example.com")
+        #expect(AppConfiguration.routingAPIBaseURL == AppConfiguration.productionRoutingAPIBaseURL)
         #if DEBUG
-        #expect(AppConfiguration.routingAPIBaseURL == AppConfiguration.localTestingRoutingAPIBaseURL)
-        #expect(AppConfiguration.migratedRoutingAPIURL(AppConfiguration.productionRoutingAPIBaseURL) == AppConfiguration.localTestingRoutingAPIBaseURL)
+        #expect(AppConfiguration.migratedRoutingAPIURL(AppConfiguration.productionRoutingAPIBaseURL) == AppConfiguration.productionRoutingAPIBaseURL)
+        #expect(AppConfiguration.migratedRoutingAPIURL(AppConfiguration.localTestingRoutingAPIBaseURL) == AppConfiguration.localTestingRoutingAPIBaseURL)
         #else
         #expect(AppConfiguration.routingAPIBaseURL == AppConfiguration.productionRoutingAPIBaseURL)
         #expect(AppConfiguration.migratedRoutingAPIURL(AppConfiguration.localTestingRoutingAPIBaseURL) == AppConfiguration.productionRoutingAPIBaseURL)

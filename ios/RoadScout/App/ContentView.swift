@@ -7,8 +7,10 @@ struct ContentView: View {
     @State private var weather = WeatherModel()
     @State private var cameraAlerts: CameraAlertModel
     @State private var drivingSpeech: SpeechAnnouncer
+    @State private var drivingSession: DrivingSessionCoordinator
+    @State private var traffic: TrafficModel
+    @State private var selectedTraffic: TrafficFeature?
     @State private var cameraBounds: CameraBounds?
-    @State private var lastCameraWarningID: String?
     @State private var selectedCamera: CameraRecord?
     @State private var planningLocation: PlanningLocationModel
     @State private var selectedPlace: Destination?
@@ -21,12 +23,9 @@ struct ContentView: View {
     @State private var following = true
     @State private var planningCamera: MapCameraPosition = .automatic
     @State private var lastMapCamera: MapCamera?
-    @State private var previewDestinationOnFix = false
-    @State private var startNavigationOnFix = false
     @State private var source: DrivingSource = .live
     @State private var showingSettings = false
     @State private var showingRouteInfo = false
-    @State private var startDemoNavigationOnFix = false
     @State private var demoError: String?
     @AppStorage("speedUnit") private var unit: SpeedUnit = .localeDefault
     @AppStorage("routingAPIURL") private var apiURL = AppConfiguration.routingAPIBaseURL
@@ -35,6 +34,7 @@ struct ContentView: View {
     @AppStorage("includeExperimentalRouting") private var includeExperimentalRouting = false
     @AppStorage("cameraWarningsEnabled") private var camerasEnabled = true
     @AppStorage("showRoofDownWeather") private var showRoofDownWeather = true
+    @AppStorage("showLiveTraffic") private var showLiveTraffic = true
     @AppStorage("cameraAudioEnabled") private var cameraAudioEnabled = true
     @AppStorage("cameraWarningDistance") private var cameraWarningDistance = 500.0
     @Environment(\.scenePhase) private var scenePhase
@@ -68,9 +68,14 @@ struct ContentView: View {
         _selectedCamera = State(initialValue: initialSelectedCamera)
         _following = State(initialValue: initialFollowing)
         let speech = SpeechAnnouncer()
+        let navigation = navigationModel ?? NavigationModel(audio: speech)
+        let traffic = TrafficModel()
+        _traffic = State(wrappedValue: traffic)
         _drivingSpeech = State(wrappedValue: speech)
-        _navigation = State(wrappedValue: navigationModel ?? NavigationModel(audio: speech))
+        _navigation = State(wrappedValue: navigation)
         _cameraAlerts = State(wrappedValue: cameraModel)
+        _drivingSession = State(wrappedValue: DrivingSessionCoordinator(driving: model,
+            navigation: navigation, cameras: cameraModel, speech: speech, traffic: traffic))
         _planningLocation = State(wrappedValue: planningLocation)
         _selectedPlace = State(initialValue: initialDestination)
         _routePlanner = State(wrappedValue: routePlanner)
@@ -93,14 +98,18 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let routeGeometry = navigation.selectedRoute.map {
+                RouteProgressGeometry(route: $0, traveledMeters: model.isDriving ? navigation.progress?.traveledMeters : nil)
+            }
+            let trafficFeatures = showLiveTraffic ? TrafficDisplayFeature.make(traffic.visibleFeatures,
+                route: navigation.selectedRoute, traveled: model.isDriving ? (navigation.progress?.traveledMeters ?? 0) : 0,
+                center: cameraBounds?.center) : []
             ZStack(alignment: .bottom) {
                 DrivingMapSurface(position: $camera, following: $following, driving: model.isDriving,
                     motion: model.motion, fix: model.fix, source: model.source, fallbackHeading: model.heading,
-                    cameraEnded: { context in
-                        lastMapCamera = context.camera
-                        cameraBounds = CameraViewportQuery.viewport(center: GeoPoint(latitude: context.region.center.latitude,
-                            longitude: context.region.center.longitude), latitudeDelta: context.region.span.latitudeDelta,
-                            longitudeDelta: context.region.span.longitudeDelta)
+                    cameraEnded: { snapshot in
+                        lastMapCamera = snapshot.camera
+                        if cameraBounds != snapshot.bounds { cameraBounds = snapshot.bounds }
                     }) {
                     if !model.isDriving {
                         ForEach(navigation.routes.filter { $0.id != navigation.selectedRoute?.id }) { route in
@@ -108,12 +117,15 @@ struct ContentView: View {
                                 .stroke(.gray.opacity(0.75), lineWidth: 5)
                         }
                     }
-                    if let route = navigation.selectedRoute {
-                        MapPolyline(coordinates: route.geometry.map(\.coordinate))
-                            .stroke(.white.opacity(0.8), lineWidth: 9)
-                        MapPolyline(coordinates: route.geometry.map(\.coordinate))
-                            .stroke(.blue, lineWidth: 6)
+                    TrafficMapContent(features: trafficFeatures.filter { $0.feature.kind == "flow" && $0.feature.routeStartMeters == nil }, select: { selectedTraffic = $0 })
+                    if showLiveTraffic, let offer = traffic.offer {
+                        MapPolyline(coordinates: offer.route.geometry.map(\.coordinate))
+                            .stroke(.purple.opacity(0.8), style: StrokeStyle(lineWidth: 5, dash: [8, 5]))
                     }
+                    if let routeGeometry {
+                        RouteMapContent(geometry: routeGeometry)
+                    }
+                    TrafficMapContent(features: trafficFeatures.filter { $0.feature.kind != "flow" || $0.feature.routeStartMeters != nil }, select: { selectedTraffic = $0 })
                     if camerasEnabled {
                         CameraMapContent(cameras: cameraAlerts.cameras, zones: cameraAlerts.zones,
                                          bounds: cameraBounds,
@@ -167,8 +179,23 @@ struct ContentView: View {
                             .padding(.horizontal, topOverlaySpacing)
                             .transition(.opacity)
                     }
+                    if let feature = selectedTraffic {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack { Text(feature.title).font(.headline); Spacer(); Button("Close") { selectedTraffic = nil } }
+                            Text("\(feature.sourceId) · Updated \(feature.observedAt.formatted(date: .omitted, time: .shortened))")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let seconds = feature.travelSeconds { Text("Measured travel time: \(Int(seconds / 60)) min") }
+                            Text(feature.matched ? "Matched road geometry" : "Reported location · road/direction may be approximate")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)).padding(.horizontal, 12)
+                    }
                     Spacer(minLength: 0)
                     if model.isDriving {
+                        if showLiveTraffic, let offer = traffic.offer {
+                            TrafficOfferCard(offer: offer,
+                                accept: { traffic.accept(fix: model.fix, navigation: navigation) }, reject: { traffic.reject() })
+                                .padding(.horizontal, 16)
+                        }
                         drivingControls(compact: geometry.size.width > geometry.size.height)
                             .transition(driveControlTransition)
                     }
@@ -179,34 +206,15 @@ struct ContentView: View {
             .onChange(of: camera) { _, newValue in
                 if newValue.positionedByUser { following = false }
             }
-            .onChange(of: model.fix) { _, fix in
+            .onChange(of: model.fix) { _, _ in
                 updateCamera()
-                if startDemoNavigationOnFix, source == .navigationReplay, fix != nil {
-                    startDemoNavigationOnFix = false
-                    navigation.start(fix: fix)
-                }
-                navigation.consume(fix)
-                refreshCameraData()
-                evaluateCameraWarnings()
-                if startNavigationOnFix, let fix, navigation.selectedRoute != nil {
-                    if navigation.startPreviewOrRecalculate(fix: fix) { startNavigationOnFix = false }
-                }
-                if previewDestinationOnFix, let fix, navigation.destination != nil {
-                    previewDestinationOnFix = false
-                    navigation.refreshFromGPS(fix)
-                }
             }
             .onChange(of: model.source) { _, value in source = value }
             .onChange(of: navigation.selectedRoute) { _, _ in
-                drivingSpeech.cancelCameraWarnings()
-                cameraAlerts.stop()
                 refreshCameraData()
-                if let route = navigation.selectedRoute {
+                refreshTrafficData()
+                    if let route = navigation.selectedRoute {
                     if model.isDriving {
-                        if startNavigationOnFix, let fix = model.fix {
-                            startNavigationOnFix = false
-                            navigation.start(fix: fix)
-                        }
                         updateCamera()
                         return
                     }
@@ -230,7 +238,7 @@ struct ContentView: View {
                 if enabled, !model.isDriving { weather.loadAll(routes: navigation.routes, endpoint: apiURL) }
             }
             .onChange(of: model.isDriving) { _, driving in
-                UIApplication.shared.isIdleTimerDisabled = driving
+                UIApplication.shared.isIdleTimerDisabled = driving && scenePhase == .active
                 searchFocused = false
                 if driving {
                     weather.clear()
@@ -241,13 +249,10 @@ struct ContentView: View {
                     updateCamera()
                 } else {
                     cameraAlerts.stop()
-                    lastCameraWarningID = nil
                     drivingSpeech.stop()
                     showingRouteInfo = false
                     navigation.pause()
                     search.updateOrigin(planningLocation.currentPoint)
-                    previewDestinationOnFix = false
-                    startNavigationOnFix = false
                     drawerDetent = selectedPlace == nil ? .collapsed : .half
                     if source != .live { exitDemo() }
                     withAnimation(reduceMotion ? nil : driveTransitionAnimation) {
@@ -263,14 +268,15 @@ struct ContentView: View {
                 }
             }
             .onChange(of: scenePhase) { _, phase in
+                UIApplication.shared.isIdleTimerDisabled = model.isDriving && phase == .active
                 if phase == .background {
-                    navigation.pause(); model.enterBackground()
+                    drivingSession.enterBackground()
                     planningLocation.stop(clearFix: true)
                     search.cancel()
                     originSearch.cancel()
-                    cameraAlerts.clear()
-                    drivingSpeech.stop()
+                    weather.clear()
                 } else if phase == .active {
+                    drivingSession.enterForeground()
                     refreshCameraData()
                 }
             }
@@ -314,22 +320,26 @@ struct ContentView: View {
                 routePlanner.applyCatalog(routingCatalog, includeExperimental: includeExperimentalRouting)
             }
             .onChange(of: apiURL) { _, newValue in
+                traffic.clear()
                 weather.clear()
                 cameraAlerts.clear()
                 drivingSpeech.cancelCameraWarnings()
                 routingCatalog.load(endpoint: newValue)
+                configureDrivingSession()
                 refreshCameraData()
             }
-            .onChange(of: cameraBounds) { _, _ in if !model.isDriving { refreshCameraData() } }
+            .task(id: cameraBounds) { if !model.isDriving { refreshCameraData(); refreshTrafficData() } }
+            .onChange(of: showLiveTraffic) { _, enabled in
+                configureDrivingSession()
+                if enabled { refreshTrafficData() } else { selectedTraffic = nil; traffic.clear() }
+            }
             .onChange(of: cameraAlerts.cameras) { _, cameras in
                 if let selectedCamera, !cameras.contains(where: { $0.id == selectedCamera.id }) {
                     self.selectedCamera = nil
                 }
-                evaluateCameraWarnings()
             }
-            .onChange(of: cameraAlerts.zones) { _, _ in evaluateCameraWarnings() }
-            .onChange(of: navigation.muted) { _, muted in drivingSpeech.setMuted(muted) }
             .onChange(of: camerasEnabled) { _, enabled in
+                configureDrivingSession()
                 if !enabled {
                     selectedCamera = nil
                     cameraAlerts.clear()
@@ -339,8 +349,10 @@ struct ContentView: View {
                 }
             }
             .onChange(of: cameraAudioEnabled) { _, enabled in
+                configureDrivingSession()
                 if !enabled { drivingSpeech.cancelCameraWarnings() }
             }
+            .onChange(of: cameraWarningDistance) { _, _ in configureDrivingSession() }
             .sheet(isPresented: .constant(!model.isDriving)) {
                 bottomDrawer(geometry: geometry)
                     .presentationDetents(selectedPlace == nil ? [DrawerDetent.collapsed.presentationDetent, .medium, .large] : [.medium, .large], selection: Binding(
@@ -363,11 +375,14 @@ struct ContentView: View {
                     } message: { Text(demoError ?? "") }
             }
             .task {
+                configureDrivingSession()
                 routingCatalog.load(endpoint: apiURL)
                 guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
                 apiURL = AppConfiguration.migratedRoutingAPIURL(apiURL)
+                configureDrivingSession()
                 routePlanner.applyCatalog(routingCatalog, includeExperimental: includeExperimentalRouting)
                 refreshCameraData()
+                refreshTrafficData()
                 if selectedPlace != nil { previewSelectedDestination() }
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--navigation-replay") {
@@ -383,6 +398,7 @@ struct ContentView: View {
                     do { try await Task.sleep(for: .seconds(60)) } catch { return }
                     if scenePhase == .active {
                         refreshCameraData()
+                        refreshTrafficData()
                         weather.expireCachedForecasts()
                     }
                 }
@@ -454,7 +470,7 @@ struct ContentView: View {
                 hasFix: model.fix != nil, isDemo: source != .live, compact: compact,
                 end: endDriving, toggleMute: { navigation.muted.toggle() },
                 start: { navigation.start(fix: model.fix); following = true; updateCamera() },
-                retry: { navigation.refreshFromGPS(model.fix) }, information: { showingRouteInfo = true })
+                retry: { drivingSession.retryRoute() }, information: { showingRouteInfo = true })
                 .sheet(isPresented: $showingRouteInfo) { routeInformation }
         }
         .padding(.horizontal, 16)
@@ -471,26 +487,20 @@ struct ContentView: View {
     }
 
     private func refreshCameraData() {
+        if model.isDriving { drivingSession.refreshCameras(); return }
         guard camerasEnabled, source == .live, scenePhase != .background else { return }
-        let bounds: CameraBounds?
-        if model.isDriving, let fix = model.fix {
-            bounds = CameraViewportQuery.around(GeoPoint(latitude: fix.latitude, longitude: fix.longitude))
-        } else {
-            bounds = cameraBounds
-        }
-        if let bounds { cameraAlerts.fetch(bounds: bounds, route: navigation.selectedRoute, endpoint: apiURL) }
+        if let bounds = cameraBounds { cameraAlerts.fetch(bounds: bounds, route: navigation.selectedRoute, endpoint: apiURL) }
     }
 
-    private func evaluateCameraWarnings() {
-        let cue = cameraAlerts.consume(fix: model.fix, heading: model.heading, route: navigation.selectedRoute,
-            progress: navigation.progress, isDriving: model.isDriving,
-            settings: CameraWarningSettings(enabled: camerasEnabled, audioEnabled: cameraAudioEnabled && !navigation.muted && source == .live,
-                                            warningDistanceMeters: cameraWarningDistance))
-        if lastCameraWarningID != cameraAlerts.alert?.id || cameraAlerts.alert?.confident != true {
-            drivingSpeech.cancelCameraWarnings()
-            lastCameraWarningID = cameraAlerts.alert?.id
-        }
-        if let cue { drivingSpeech.speakCamera(cue.announcement, language: Locale.preferredLanguages.first ?? "en-US") }
+    private func configureDrivingSession() {
+        drivingSession.configure(DrivingSessionSettings(endpoint: apiURL, camerasEnabled: camerasEnabled,
+            cameraAudioEnabled: cameraAudioEnabled, warningDistance: cameraWarningDistance, trafficEnabled: showLiveTraffic))
+    }
+
+    private func refreshTrafficData() {
+        guard showLiveTraffic, model.source == .live, scenePhase == .active else { return }
+        let bounds = model.fix.map { CameraViewportQuery.around(GeoPoint(latitude: $0.latitude, longitude: $0.longitude)) } ?? cameraBounds
+        if let bounds { traffic.fetchMap(bounds: bounds, route: navigation.selectedRoute, endpoint: apiURL) }
     }
 
     private func endDriving() {
@@ -508,7 +518,8 @@ struct ContentView: View {
                     Section("Route") {
                         Text(navigation.destination?.name ?? String(localized: "Current route"))
                         if let via = RoutePresentation.corridorLabel(for: route) { Text(via) }
-                        Text("Arrival times are estimates and do not include live traffic.").font(.footnote)
+                        Text("Arrival times are estimates; traffic coverage may be partial.").font(.footnote)
+                        if let status = traffic.status { Text(status).font(.footnote) }
                     }
                     Section("Attribution") { Text(route.attribution).font(.footnote).textSelection(.enabled) }
                 }
@@ -717,8 +728,9 @@ struct ContentView: View {
         planningCamera = lastMapCamera.map(MapCameraPosition.camera) ?? camera
         searchFocused = false
         following = true
-        previewDestinationOnFix = navigation.destination != nil && navigation.selectedRoute == nil
+        configureDrivingSession()
         model.start(source: source)
+        if navigation.destination != nil, navigation.selectedRoute == nil { drivingSession.requestNavigationStart() }
     }
 
     private var searchBar: some View {
@@ -877,8 +889,8 @@ struct ContentView: View {
                                objective: objective, maxExtraDurationPercent: routePlanner.maxExtraDurationPercent)
         }
         routePlanner.origin = .myLocation
-        startNavigationOnFix = true
         beginDriving()
+        drivingSession.requestNavigationStart()
     }
 
     private var settings: some View {
@@ -894,6 +906,18 @@ struct ContentView: View {
                     Toggle("Prefer avoiding motorways", isOn: $avoidHighways)
                     Text("Avoidance is a preference, not a guarantee. Route availability depends on map coverage.")
                         .font(.caption)
+                }
+                Section {
+                    TextField("API base URL", text: $apiURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .accessibilityLabel("RoadScout API base URL")
+                    Button("Use default server") { apiURL = AppConfiguration.routingAPIBaseURL }
+                } header: {
+                    Text("RoadScout API")
+                } footer: {
+                    Text("Default: \(AppConfiguration.routingAPIBaseURL). Enter the base URL without /v1/routes. Used for routes, cameras and weather; changes apply to subsequent requests.")
                 }
                 Section("Cameras") {
                     Toggle("Show cameras and warnings", isOn: $camerasEnabled)
@@ -913,6 +937,22 @@ struct ContentView: View {
                     Text("Route samples and their estimated passage times are sent through your RoadScout server to Open-Meteo. Weather is shown only while planning.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section("Live traffic") {
+                    Toggle("Show traffic and route suggestions", isOn: $showLiveTraffic)
+                    if let status = traffic.status { Text(status).font(.caption) }
+                    if let map = traffic.map {
+                        Text(map.routingEnabled ? "Traffic-aware routing enabled" : "Traffic-aware routing is not enabled on this server.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(map.sources, id: \.id) { source in
+                            Text("\(source.countries.joined(separator: ", ")) · \(source.attribution)").font(.caption)
+                            if source.stale { Text("Source may be stale or partial.").font(.caption).foregroundStyle(.secondary) }
+                            if let message = source.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        if map.truncated { Text("Map traffic is partial at this zoom level.").font(.caption) }
+                    }
+                    Text("Traffic-aware routes depend on server support and measured road coverage. Faster routes use a 15-second Yes countdown; No keeps your route. Suggestions cancel when the app is hidden.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 CameraDataSettings(metadata: cameraAlerts.metadata, cached: cameraAlerts.isUsingCache,
                                    status: cameraAlerts.statusMessage)
                 Section {
@@ -927,12 +967,13 @@ struct ContentView: View {
                     Text("Route styles")
                 }
                 Section("Location & privacy") {
-                    Text("Search can request a single foreground location to find nearby places and show distances. Driving uses continuous location until stopped. Backgrounding pauses navigation, stops location collection and clears the planning fix. Place search uses Apple services. Route requests send origin and destination to your RoadScout server and its routing engine. No analytics or trip recording.")
-                    Text("Route ETA is an estimate and does not include live traffic.")
+                    Text("Search requests a single foreground location. A live drive continues navigation and camera warnings when the screen is locked or another app is open, until you tap End. The system shows its background location indicator. Motion sensors and map animation pause while backgrounded. Place search uses Apple services; routes and camera queries use your RoadScout server. No analytics or trip recording.")
+                    Text("Location permission and iOS background scheduling are required. Force-quitting or system termination stops the session; RoadScout does not restart tracking automatically. Demo sessions stop in the background.")
+                    Text("Route ETA is an estimate. Live traffic depends on server support and road coverage.")
                 }
                 Section {
                     NavigationLink("Demo & Testing") {
-                        DemoTestingView(apiURL: $apiURL, isDemo: source != .live,
+                        DemoTestingView(isDemo: source != .live,
                                         startFreeDrive: { startDemo(.replay) },
                                         startNavigation: { startDemo(.navigationReplay) },
                                         exitDemo: { exitDemo(); showingSettings = false })
@@ -960,7 +1001,6 @@ struct ContentView: View {
         originSearch.clearSelection()
         selectedPlace = nil
         search.clearSelection()
-        startDemoNavigationOnFix = false
         model.stop()
         navigation.end()
         search.cancel()
@@ -977,9 +1017,9 @@ struct ContentView: View {
             planningCamera = lastMapCamera.map(MapCameraPosition.camera) ?? camera
             if demoSource == .navigationReplay { try navigation.loadDemo() }
             source = demoSource
-            startDemoNavigationOnFix = demoSource == .navigationReplay
             showingSettings = false
             model.start(source: demoSource)
+            if demoSource == .navigationReplay { drivingSession.requestNavigationStart() }
         } catch {
             exitDemo()
             showingSettings = false
@@ -1035,14 +1075,18 @@ private final class DrivingPreviewLocationProvider: LocationProviding {
     var onEvent: ((LocationEvent) -> Void)?
     let timestamp: Date
     let speed: Double
+    let point: GeoPoint
+    let course: Double
 
-    init(timestamp: Date, speed: Double = 13.89) { self.timestamp = timestamp; self.speed = speed }
+    init(timestamp: Date, speed: Double = 13.89, point: GeoPoint = GeoPoint(latitude: 52.09, longitude: 5.12), course: Double = 45) {
+        self.timestamp = timestamp; self.speed = speed; self.point = point; self.course = course
+    }
 
     func start() {
         onEvent?(.access(.authorized))
-        onEvent?(.fix(LocationFix(latitude: 52.09, longitude: 5.12,
+        onEvent?(.fix(LocationFix(latitude: point.latitude, longitude: point.longitude,
                                   speed: speed, speedAccuracy: 0.5,
-                                  horizontalAccuracy: 5, course: 45,
+                                  horizontalAccuracy: 5, course: course,
                                   timestamp: timestamp)))
     }
 
@@ -1078,20 +1122,27 @@ private func drivingPreviewModel() -> DrivingModel {
 }
 
 extension ContentView {
-    @MainActor static func navigationDashboardPreview(unavailableSpeed: Bool = false, panned: Bool = false) -> ContentView {
+    @MainActor static func navigationDashboardPreview(unavailableSpeed: Bool = false, panned: Bool = false, progressPreview: Bool = false) -> ContentView {
         let timestamp = Date()
         let driving = DrivingModel(makeProvider: { _ in
-            DrivingPreviewLocationProvider(timestamp: timestamp, speed: unavailableSpeed ? -1 : 13.89)
+            DrivingPreviewLocationProvider(timestamp: timestamp, speed: unavailableSpeed ? -1 : (progressPreview ? 0 : 13.89),
+                point: GeoPoint(latitude: progressPreview ? 52.0907 : 52.09, longitude: 5.12), course: progressPreview ? 0 : 45)
         }, now: { timestamp })
         driving.start(source: .navigationReplay)
         let navigation = NavigationModel(audio: DashboardPreviewAudio(), now: { timestamp })
         try? navigation.loadDemo()
         navigation.start(fix: driving.fix)
-        return ContentView(model: driving, navigationModel: navigation, initialFollowing: !panned)
+        var view = ContentView(model: driving, navigationModel: navigation, initialFollowing: !(panned || progressPreview))
+        if progressPreview, let route = navigation.selectedRoute {
+            let line = MKPolyline(coordinates: route.geometry.map(\.coordinate), count: route.geometry.count)
+            view._camera = State(initialValue: .rect(line.boundingMapRect.insetBy(dx: -1800, dy: -1800)))
+        }
+        return view
     }
 }
 
 #Preview("Driving · navigation bottom card") { ContentView.navigationDashboardPreview() }
+#Preview("Driving · completed route faded") { ContentView.navigationDashboardPreview(progressPreview: true) }
 #Preview("Driving · unknown speed, no banner") { ContentView.navigationDashboardPreview(unavailableSpeed: true) }
 #Preview("Driving · panned, recenter above card") { ContentView.navigationDashboardPreview(panned: true) }
 #Preview("Driving · navigation landscape", traits: .landscapeLeft) { ContentView.navigationDashboardPreview() }

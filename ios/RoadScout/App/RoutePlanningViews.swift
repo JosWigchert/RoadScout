@@ -85,7 +85,7 @@ struct RoutePlanningView: View {
                         ForEach(navigation.routes) { route in
                             routeOption(route, selected: route.id == selected.id)
                         }
-                        Text("Arrival times are estimates and do not include live traffic.")
+                        Text("Arrival times are estimates. Live traffic applies only where supported and covered.")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(selected.attribution).font(.caption2).foregroundStyle(.secondary)
                         if weather != nil { WeatherAttribution() }
@@ -144,6 +144,7 @@ struct RoutePlanningView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if let weather { WeatherRouteLine(state: weather.state(for: route), unit: unit) }
+                    if let traffic = route.traffic { TrafficRouteLabel(traffic: traffic) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())

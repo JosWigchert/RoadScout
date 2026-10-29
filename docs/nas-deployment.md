@@ -22,6 +22,7 @@
 
    Repeat for staging. Copy an existing `snapshot.json` if desired; otherwise the normal asynchronous import populates it. Do not point staging and production at the same directory.
 5. Point each hostname at your existing Traefik HTTPS ingress and ensure its `websecure` entrypoint and `letsencrypt` resolver match the configuration.
+   For traffic overlays, the Compose file mounts the checked-out `deploy/traffic.config.example.json` read-only. It enables NDW ingestion and **disables traffic-aware routing**. To provide a separate staging-only configuration, set `TRAFFIC_CONFIG_HOST_FILE` to an absolute NAS path in `staging.env`; do not share a mutable config with production. Set staging's `VALHALLA_BASE_URL` to the staging Valhalla service and keep its camera data directory and hostname distinct. Do not set `enableRouting` until the bridge/graph tests in `traffic-valhalla-handoff.md` are complete.
 6. Push these files, open **Actions → Deploy on NAS → Run workflow**, choose the branch and target. The summary records the URL and commit only after successful health/readiness checks.
 
 No GitHub secrets are required. NAS environment files are not committed. Additional backend settings (for example `OPEN_METEO_BASE_URL` and `WEATHER_CACHE_TTL`) can be added there; they are passed to the API container. Keep deployment-owned `LISTEN_ADDR`, `CAMERA_DATA_DIR`, `ROUTING_PROVIDER`, `DEPLOY_TARGET`, `RELEASE_ID` and `NAS_ENV_FILE` out of the file.
@@ -43,3 +44,9 @@ Deployments recreate one API instance per target and have a short interruption. 
 If migrating from the old `roadscout-api` Compose project, stop its `routing-api` service before the first production deployment to avoid duplicate public routers and concurrent snapshot writers. Do not stop Valhalla or Traefik.
 
 After deployment, verify public `/healthz`, `/readyz`, `/v1/capabilities` and a real `POST /v1/routes` using `deploy/route-request.json`. Readiness checks Valhalla availability, not graph coverage or camera import completion. Use the production HTTPS endpoint in the app's server setting when testing with the current Debug build, whose default still points at the Mac.
+
+### Traffic staging smoke check
+
+After pushing a reviewed commit, manually dispatch **Deploy on NAS** with target **staging**. The workflow deploys the selected committed ref, not uncommitted local files. In the iPhone app set **Settings → RoadScout API** to the staging HTTPS base URL and enable **Live traffic**. Query a Dutch viewport and verify source freshness/attribution and incident markers. Matching is deliberately bounded and warms over successive refreshes, so congestion coverage may initially be sparse.
+
+Inspect `/v1/capabilities`: `traffic.enabled` and `mapEnabled` should be true; `routingEnabled` should be false until the separate bridge is installed and verified. Traffic offers/ETA will not appear while routing is false. The existing staging API, Valhalla and camera data stay isolated from production only if the staging NAS environment and host directories point at their staging resources. No actual NAS deployment or HTTPS staging check was performed from this workstation.

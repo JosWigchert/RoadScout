@@ -1,7 +1,7 @@
 import Foundation
 
 enum Polyline6 {
-    static func decode(_ encoded: String) throws -> [GeoPoint] {
+    static func decode(_ encoded: String, minimumPoints: Int = 2) throws -> [GeoPoint] {
         guard encoded.utf8.count <= 2_000_000 else { throw RoutingError.invalidResponse }
         let bytes = Array(encoded.utf8)
         var index = 0
@@ -29,7 +29,7 @@ enum Polyline6 {
             guard point.isValid, points.count < 100_000 else { throw RoutingError.invalidResponse }
             points.append(point)
         }
-        guard points.count >= 2 else { throw RoutingError.invalidResponse }
+        guard points.count >= minimumPoints else { throw RoutingError.invalidResponse }
         return points
     }
 }

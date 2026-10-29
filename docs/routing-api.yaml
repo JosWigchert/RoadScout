@@ -199,6 +199,17 @@ components:
         experiment: {$ref: '#/components/schemas/RouteExperiment'}
         weatherToken: {type: string, description: Opaque token for POST /v1/weather; no route geometry is resent. Expires after 15 minutes.}
         weatherExpiresAt: {type: string, format: date-time, description: UTC expiry of the weather route token.}
+        traffic:
+          type: object
+          description: Advisory traffic metadata; missing data never invalidates a route. See traffic-api.md.
+          properties:
+            mode: {type: string, enum: [unavailable, live_partial]}
+            token: {type: string, description: Renewable traffic context independent of weather expiry.}
+            coveragePercent: {type: number, minimum: 0, maximum: 100}
+            snapshotId: {type: string}
+            expiresAt: {type: string, format: date-time}
+            corridorKey: {type: string}
+            leadMeters: {type: number, minimum: 0}
         geometry:
           type: object
           required: [encoding, dimensions, pointCount, data]
@@ -237,7 +248,7 @@ components:
           required: [method, traffic, anchors]
           properties:
             method: {type: string, const: maneuver_interpolation}
-            traffic: {type: string, const: unknown}
+            traffic: {type: string, enum: [unknown, live_partial]}
             anchors:
               type: array
               minItems: 2

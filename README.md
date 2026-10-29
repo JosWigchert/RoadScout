@@ -12,9 +12,11 @@ The app bundle identifier is `nl.joswigchert.roadscout` (tests: `nl.joswigchert.
 
 ### Temporary hosted LAN testing
 
+**Current API configuration:** **Settings → RoadScout API** exposes the Go API base URL and **Use default server**. The default is **`https://roadscout.joswigchert.nl`** in both Debug and Release. It is shared by routing, cameras and weather. Enter a base URL without `/v1/routes`; saved custom Debug overrides are preserved, including the previous LAN address. To switch an existing LAN-configured installation back to the public server, tap **Use default server**.
+
 The Go API is currently hosted on this Mac at **`http://192.168.1.157:8080`**, listening on all interfaces and using NAS Valhalla at `http://192.168.1.111:8002`.
 
-- Build/run **Debug** on an iPhone on the same LAN/Wi-Fi and allow RoadScout's **Local Network** permission. Debug defaults to the Mac's URL and migrates the previously saved public default; unrelated explicit overrides are preserved. Settings → Demo & Testing → Use default server selects the current build's default.
+- For optional LAN testing, build/run **Debug** on an iPhone on the same LAN/Wi-Fi, enter the Mac's URL under **Settings → RoadScout API**, and allow RoadScout's **Local Network** permission. The LAN address is an explicit override; **Use default server** restores public HTTPS.
 - **Release** still defaults to `https://roadscout.joswigchert.nl`, requires HTTPS and migrates the temporary LAN URL back to that public default. Its processed Info.plist contains no local HTTP exception. Build Release to return to the production configuration.
 - The HTTP exception is limited to the configured Debug host/port; redirects cannot downgrade HTTPS or switch to another HTTP host. If the Mac's IP changes, update `AppConfiguration.localTestingRoutingAPIBaseURL` and the Debug-only ATS domain in `Supporting/Info.plist`, rebuild, and select Use default server.
 - Restart the current prototype server from `backend/` with `ENABLE_EXPERIMENTAL_ROUTING=1 VALHALLA_BASE_URL=http://192.168.1.111:8002 LISTEN_ADDR=0.0.0.0:8080 go run .`. Omit the experimental flag for Fastest-only API behavior. The Mac must remain reachable while testing.
@@ -109,7 +111,19 @@ See `docs/phase-6-prototype.md` for the scoring/verification limits. Release's p
 
 ## Free drive (Phase 1)
 
+### Background / locked-screen driving (Phase 5 slice)
+
+A live drive started in the foreground now keeps GPS, navigation/rerouting and camera warning evaluation running when you lock the screen or switch apps. **End** stops the session. This uses When In Use permission with iOS's background location indicator; no Always permission or automatic tracking restart is requested. Motion sensors/compass and map animation pause in the background, then resume from a fresh fix on returning to the app. Planning search/location/weather work stops or clears; demos still stop when backgrounded.
+
+Settings → Location & privacy explains the behavior. Permission loss, force-quit, system termination or OS scheduling can interrupt service; an ended session never restarts itself. Deterministic background callback/lifecycle tests and Release simulator/iPhone-target builds passed; locked-screen physical-device/audio/energy acceptance remains pending. See [`docs/phase-5-background.md`](docs/phase-5-background.md).
+
+Voice guidance and camera speech activate/deactivate audio asynchronously on iOS 27+, with an off-main fallback for iOS 18–26. Session transitions are serialized; Stop/mute cancels speech waiting for activation. This removes RoadScout's explicit blocking audio-session calls from the UI thread. On-device audio/Bluetooth verification remains pending.
+
+Legacy Apple voice lookup/speech start runs on the main run loop outside Swift task context. A simulator navigation replay verified that this removes the reproduced `unsafeForcedSync` warning; rebuilt-iPhone confirmation remains pending.
+
 ### Smooth mounted-phone motion
+
+iPhone route-start crash fix (2026-10-27): corrected a Swift 6 thread-isolation trap in the live Core Motion callback. Background-callback regression tests and simulator/device-target builds pass; rebuild and run the updated app on the iPhone for startup confirmation.
 
 The driving arrow and follow-camera now share a continuously predicted pose, targeting 30 Hz presentation between GPS fixes. GPS speed/course provide the baseline; Core Motion's fused accelerometer/gyroscope/magnetometer readings assist acceleration, braking and turns. Gravity-compensated acceleration is transformed out of phone axes, and magnetic quality gates north-referenced acceleration. Handling or unavailable sensors falls back to GPS-based prediction. Prediction freezes after two seconds without a fresh usable measurement; it is not long-term inertial navigation.
 
@@ -119,7 +133,9 @@ Motion readings stay on the phone and stop with the foreground drive. Optimized 
 
 Driving has its own animated map mode: the planning sheet/search dismiss, the map moves into closer tilted heading-follow, and equal-size circular speed/limit instruments appear. The speed circle contains only the number in your selected km/h or mph setting. A single bottom card contains maneuver guidance, estimated arrival/remaining time/distance, **End**, sound and route information. End stops the session/GPS and returns to planning. Recenter appears just above the card's top-right edge only after panning away from follow. There is no separate large Stop button or GPS-speed-unavailable banner; unknown speed remains a dash.
 
-The driving position marker is a white arrow with a dark outline, without a blue puck. Display heading now uses a responsive **0.3-second** circular filter with 0.15-second source-heading and 0.35-second camera easing. Actual map rotation is compensated immediately rather than adding another arrow animation, avoiding the earlier compounded multi-second lag. Reduced Motion disables interpolation. Navigation's GPS/course inputs are unchanged. A standalone arrow Canvas preview is in `Features/Driving/DrivingPositionArrow.swift`.
+The driving position marker is a white arrow with a dark outline, without a blue puck. Arrow and follow-camera share the predicted pose, with 0.3-second GPS correction blending and immediate map-heading compensation rather than stacked easing animations. Reduced Motion removes decorative transitions. Navigation's GPS/course inputs remain independent of visual prediction. A standalone arrow Canvas preview is in `Features/Driving/DrivingPositionArrow.swift`.
+
+During navigation, the completed route fades to translucent gray while the remaining route stays blue with its white outline. The split uses validated shape progress, not predicted display motion; route planning shows the full route, and rerouting resets the displayed split. Debug `--route-progress-preview` / **Driving · completed route faded** Canvas preview demonstrates this with synthetic geometry.
 
 Free drive has a compact bottom card with End. Route loading/errors/retry, ready/resume and arrival states share the navigation card. The ellipsis opens full route attribution and estimate information. `ContentView.swift` includes full-screen navigation, unknown-speed, recenter and landscape Canvas previews; `DrivingDashboard.swift` also has a free-drive component preview. Debug arguments `--driving-dashboard-preview --missing-speed --panned` show a fixed synthetic navigation screen without GPS permission or a routing request.
 
@@ -130,7 +146,7 @@ The overspeed design uses a red ring and an exclamation badge when valid measure
 - Open **Settings** to choose km/h or mph. Units persist locally and initially follow the device locale.
 - To try it without GPS, open **Settings → Demo & Testing → Start free-drive demo**. The labeled 15-second replay includes acceleration, GPS errors and stopping. Tap **End** in the bottom card to exit the demo and restore live mode. Demos do not persist across app launches.
 - Unknown speed shows **—**, never an invented zero. Speed limit remains explicitly unknown.
-- Appearance follows the system. Active sessions keep the screen awake; manual locking/backgrounding stops the session. Restart explicitly on return. Background navigation is deferred to Phase 5.
+- Appearance follows the system. Foreground driving keeps the screen awake; manual locking/backgrounding keeps an ongoing live drive active with visual motion paused. Demo sessions stop in the background.
 
 For an automated Debug simulator preview, add `--replay` to the scheme's launch arguments, or use (Release builds ignore replay launch flags):
 
@@ -142,7 +158,7 @@ xcrun simctl launch --terminate-running-process booted nl.joswigchert.roadscout 
 
 Latest local Go smoke check (2026-10-24): `/healthz` and `/readyz` pass on `127.0.0.1:8080`, using NAS Valhalla at `http://192.168.1.111:8002` (reported version 3.5.1). The real Utrecht → Amersfoort sample returns three routes: approximately **28.06 km / 23.9 min**, **27.82 km / 26.5 min**, and **39.72 km / 30.9 min**, with no warnings. This supersedes the earlier connection failure. Public HTTPS and physical navigation/road acceptance remain pending.
 
-Current verification: **74 Debug Swift test methods / 97 executed cases passed**, including real Fastest and experimental LAN URLSession requests; **72 Release methods / 95 executed cases passed**. Go race tests and vet passed at prototype verification. Real local Go → NAS Valhalla routing, metadata and prototype comparisons are verified; public HTTPS/Docker deployment, full graph coverage and physical-device acceptance remain pending. Phase 2's earlier 37-method/51-case result is historical. Deployment instructions: `backend/README.md`; prototype results: `docs/phase-6-prototype.md`.
+Current verification (2026-10-28): full Debug tests passed for the background lifecycle/coordinator work; the subsequent route-appearance/background-focused run passed **11 tests**, zero failures. Release arm64 simulator and unsigned Release iPhone-target builds passed, with `location`/`audio` background modes verified in both processed plists. Earlier Go/LAN/prototype checks remain recorded in `docs/testing.md`; no new physical-device, road, public-deployment or energy acceptance is claimed. Deployment instructions: `backend/README.md`; prototype results: `docs/phase-6-prototype.md`.
 
 RoadScout rename verified on 2026-10-23: the renamed project builds, all 21 test methods pass (29 executed cases), and `com.roadscout.RoadScout` installs and launches in the simulator with synthetic replay.
 
@@ -151,10 +167,10 @@ Phase 0 is verified. Phase 1 is implemented and simulator-verified: build succee
 ## Navigation (Phase 2)
 
 1. Deploy Go on your NAS using `backend/README.md`. Defaults: HTTP **:8080**, upstream **http://Valhalla:8002**. Traefik supplies the app-facing HTTPS hostname. Direct LAN testing uses **http://192.168.1.111:8080**.
-2. Release defaults to **https://roadscout.joswigchert.nl**; the temporary Debug LAN default is **http://192.168.1.157:8080**. Set toll/motorway preferences in Settings if desired. An endpoint override and reset-to-default action live under **Settings → Demo & Testing**. Unrelated explicit overrides are preserved; the known public/LAN defaults migrate according to the build configuration.
+2. Both builds default to **https://roadscout.joswigchert.nl**. Set toll/motorway preferences in Settings if desired. Endpoint override and reset live under **Settings → RoadScout API**; Debug can explicitly select the temporary LAN endpoint. Saved custom Debug overrides are preserved.
 3. In planning mode, search a place/address and select a result. Directions calculates and fits the full route on the map. Edit From/To if needed and review route estimates/alternatives; tap **Drive**. Allow location if needed. Guidance starts after a fresh driving fix and a successful RoadScout route response.
 4. Speed stays visible. Guidance is spoken unless muted. Rerouting requires sustained off-route evidence and uses cooldown/backoff. If Go/Valhalla is unreachable, the loaded route stays in memory; no new route can be calculated.
-5. **End** on the bottom card ends navigation and GPS and returns to planning. Backgrounding stops GPS and pauses loaded guidance; restart through planning with a fresh physical fix.
+5. **End** on the bottom card ends navigation and GPS and returns to planning. Locking/backgrounding preserves a live drive's guidance/progress; foregrounding restores visual motion without recreating the location session. Demos stop on backgrounding.
 
 To try navigation without a server, use **Settings → Demo & Testing → Start navigation demo**. Replay and navigation start automatically; no GPS permission or server is needed. The route is synthetic and labeled. **End** on the driving card clears replay/navigation state and returns to live planning. Live destination lookup is disabled during a demo. Normal launches always open the ordinary live driving map. Or launch a Debug build with:
 
@@ -169,9 +185,17 @@ go test -race -timeout 30s ./...
 go vet ./...
 ```
 
-Navigation is foreground-only, ETA/timing are estimates, and speed limits stay unknown. Weather/scenic/CarPlay features remain in later phases. Live NAS integration, graph coverage and physical-device road acceptance must be verified separately; see `docs/testing.md`.
+Background/locked navigation is implemented but still requires iPhone field acceptance. ETA/timing are estimates and speed limits stay unknown. Planning weather and the early Scenic/More Corners prototype are implemented; CarPlay remains future work. Graph coverage and physical-device road acceptance must be verified separately; see `docs/testing.md`.
 
 ## Cameras (Phase 3, Netherlands)
+
+Viewport-driven camera queries settle for 100 ms and skip unchanged quantized bounds. This keeps map/cluster updates out of SwiftUI's same-frame bounds feedback loop while the driving arrow and camera continue using the motion display clock.
+
+## Dutch traffic · staging
+
+The Go API imports NDW DATEX II v3 events and travel times. The iPhone can show reported incidents/closures and matched congestion on the map; Settings → Live traffic shows the source and whether traffic routing is available. Road matching warms gradually and coverage is partial. Missing/stale data is not treated as free flow. `--traffic-preview` is a synthetic UI preview, not live conditions.
+
+The included NAS traffic config defaults to `enableRouting: false`. Traffic-aware ETA, route choices and timed faster-route offers require the separate, graph-matched Valhalla updater described in `docs/traffic-valhalla-handoff.md`; they remain unavailable until deployed and verified. Set Settings → RoadScout API to the staging HTTPS URL when testing. See `docs/traffic-api.md` and `docs/nas-deployment.md` for configuration and limits.
 
 Camera data comes **only from the Go API**, through one `POST /v1/cameras` endpoint. The app does not bundle a camera dataset.
 

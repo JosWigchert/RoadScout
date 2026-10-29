@@ -3,6 +3,7 @@ import Observation
 
 @MainActor @Observable
 final class CameraAlertModel {
+    @ObservationIgnored var onDataChanged: (() -> Void)?
     private(set) var cameras: [CameraRecord] = []
     private(set) var zones: [AverageSpeedZone] = []
     private(set) var metadata: CameraDatasetMetadata?
@@ -91,6 +92,7 @@ final class CameraAlertModel {
         if cached { messages.append("Cached query area only; saved \(entry.fetchedAt.formatted()).") }
         if currentMetadata.stale { messages.append("Mapped camera dataset is stale.") }
         statusMessage = messages.isEmpty ? nil : messages.joined(separator: " ")
+        onDataChanged?()
     }
 
     func consume(fix: LocationFix?, heading: Double, route: DrivingRoute?, progress: NavigationProgress?,
@@ -108,5 +110,6 @@ final class CameraAlertModel {
         task?.cancel(); task = nil; generation += 1
         stop(); cameras = []; zones = []; metadata = nil; isUsingCache = false; statusMessage = nil
         requestedScope = nil; loadedScope = nil; requestedAt = nil; cachedBounds = nil; fetchedAt = nil
+        onDataChanged?()
     }
 }

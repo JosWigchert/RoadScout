@@ -226,6 +226,7 @@ type Route struct {
 	Experiment       *RouteExperiment `json:"experiment,omitempty"`
 	WeatherToken     string           `json:"weatherToken,omitempty"`
 	WeatherExpiresAt *time.Time       `json:"weatherExpiresAt,omitempty"`
+	Traffic          *RouteTraffic    `json:"traffic,omitempty"`
 }
 type Warning struct {
 	Code    string `json:"code"`
@@ -260,6 +261,7 @@ type RoutingProvider interface {
 type Valhalla struct {
 	BaseURL string
 	Client  *http.Client
+	traffic *trafficService
 }
 
 func newValhalla(base string) (*Valhalla, error) {
@@ -267,7 +269,7 @@ func newValhalla(base string) (*Valhalla, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("invalid VALHALLA_BASE_URL")
 	}
-	return &Valhalla{strings.TrimRight(base, "/"), &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Valhalla{BaseURL: strings.TrimRight(base, "/"), Client: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 func (v *Valhalla) Ready(ctx context.Context) error {
 	req, _ := http.NewRequestWithContext(ctx, "GET", v.BaseURL+"/status", nil)
@@ -344,6 +346,19 @@ func (v *Valhalla) Routes(ctx context.Context, r RouteRequest) ([]Route, []Warni
 		return .5
 	}
 	payload := map[string]any{"locations": locations, "costing": "auto", "alternates": r.Alternatives, "units": "kilometers", "language": r.Language, "directions_type": "instructions", "costing_options": map[string]any{"auto": map[string]any{"use_tolls": preference(r.Preferences.Tolls), "use_highways": preference(r.Preferences.Motorways), "use_ferry": preference(r.Preferences.Ferries)}}}
+	var trafficState *RouteTraffic
+	if v.traffic != nil {
+		trafficState=&RouteTraffic{Mode:"unavailable"}
+		speeds := []string{"freeflow", "constrained", "predicted"}
+		live := v.traffic.nativeReady(ctx)
+		if live {v.traffic.bridge.mu.RLock();status:=v.traffic.bridge.status;v.traffic.bridge.mu.RUnlock();live=status.Ready&&status.ExpiresAt.After(v.traffic.now().Add(20*time.Second));if live{expires:=status.ExpiresAt;trafficState=&RouteTraffic{Mode:"live_partial",SnapshotID:status.SnapshotID,ExpiresAt:&expires}}}
+		payload["costing_options"].(map[string]any)["auto"].(map[string]any)["ignore_closures"] = !live
+		if live {
+			speeds = append(speeds, "current")
+			payload["date_time"] = map[string]any{"type": 0}
+		}
+		payload["costing_options"].(map[string]any)["auto"].(map[string]any)["speed_types"] = speeds
+	}
 	data, _ := json.Marshal(payload)
 	req, _ := http.NewRequestWithContext(ctx, "POST", v.BaseURL+"/route", strings.NewReader(string(data)))
 	req.Header.Set("Content-Type", "application/json")
@@ -409,6 +424,7 @@ func (v *Valhalla) Routes(ctx context.Context, r RouteRequest) ([]Route, []Warni
 		}
 		routes = append(routes, route)
 	}
+	if trafficState!=nil {for i:=range routes {state:=*trafficState;routes[i].Traffic=&state}}
 	return routes, warnings, nil
 }
 func normalize(t vhTrip, req RouteRequest) (Route, error) {

@@ -39,4 +39,9 @@ protocol LocationProviding: AnyObject {
     var onEvent: ((LocationEvent) -> Void)? { get set }
     func start()
     func stop()
+    func setBackgrounded(_ backgrounded: Bool)
+}
+
+extension LocationProviding {
+    func setBackgrounded(_ backgrounded: Bool) { }
 }

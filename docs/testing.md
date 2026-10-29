@@ -1,5 +1,57 @@
 # Testing
 
+## Dutch traffic staging verification · 2026-10-29
+
+Full Debug simulator build/test passed: XCResult reports 187 methods (183 passed, 4 opt-in live skips), 215 passed parameterized executions, zero failures. Go `go test -race -timeout 90s ./...` and `go vet ./...` passed. Release arm64 simulator build passed after the final Swift edits. NAS Compose config rendered with `docker-compose`; the Docker daemon was unavailable for container deployment.
+
+Live NDW `-traffic-sync-once` returned fresh source metadata and 59,674 records, with 18 matches during the bounded first pass. A separate isolated local API process returned 151 incident/closure features for a Dutch viewport and reported `routingEnabled:false`; three real LAN-Valhalla routes returned traffic and weather tokens with unavailable traffic-cost mode. A synthetic `--traffic-preview` map/countdown was inspected. A single-point incident decoding regression and expired-token viewport fallback are tested. There was no staging NAS deployment, staging Valhalla traffic-writer proof, physical-device/road test or live traffic ETA claim. User will deploy the reviewed committed ref using the staging GitHub Action.
+
+## Traveled-route appearance acceptance · 2026-10-28
+
+Before implementation: while driving, split the selected route at validated navigation shape progress; render traveled geometry muted/translucent and remaining geometry blue with its existing outline. Planning keeps the full route prominent. Interpolate a shared cut point, handle exact vertices/start/end/invalid progress/dateline crossing, and recompute from the new route after rerouting. Test the pure geometry split; do not use predicted display motion to advance navigation progress.
+
+Verified: five pure geometry tests plus six background-driving integration tests passed (11 total, no failures/skips). Synthetic `--route-progress-preview` was inspected: completed geometry is muted gray, remaining geometry blue/outlined; this is invented geometry, not a road-alignment check. Release arm64 simulator and unsigned Release iPhone-target builds passed. Progress uses tracker shape arclength, not engine summary distance or visual prediction.
+
+## Phase 5 background driving verification · 2026-10-28
+
+Acceptance was recorded first in `phase-5-background.md`. The full Debug suite passed after background lifecycle/coordinator integration. Deterministic coverage includes manager authorization/capability/indicator flags, foreground-only permission requests, GPS vs compass lifecycle, services/revocation cleanup, active vs demo/ended sessions, motion suspension/reseeding/stale data, background route startup/progress/voice/camera data/arrival/rerouting without a view, mute/End and late callbacks. A regression verifies discarded SwiftUI State candidates cannot steal session callbacks.
+
+Release simulator arm64 (`ONLY_ACTIVE_ARCH=YES`) and unsigned Release generic iOS builds passed. Both processed Info.plists declare location/audio modes. An earlier universal simulator Release command exceeded its 200-second timeout while optimizing x86_64; no x86_64 Release success is claimed. Simulator tests/builds do not establish background scheduling or locked audio delivery on a physical iPhone.
+
+A final ordinary synthetic `--navigation-replay` launch after the coordinator/route-display changes logged none of the earlier per-frame state, unsafeForcedSync or audio UI-unresponsiveness warnings in the inspected process. This remains foreground simulator verification; demos intentionally stop if backgrounded.
+
+Manual acceptance: on an iPhone, start a live route in the foreground, verify the system background indicator after locking/switching apps, listen for turns and a relevant camera warning, deliberately miss a turn, return without losing progress, then End and confirm the indicator stops. Repeat for GPS/network gaps, revoked permission, Bluetooth/music/call interruption and an extended energy/thermal run. No automatic restart after force-quit/termination is implemented. Planning fixes/search/weather clear or stop; demos stop on backgrounding.
+
+## Camera viewport feedback acceptance · 2026-10-27
+
+Before fixing: reported SwiftUI `onChange(of: Optional<CameraBounds>) action tried to update multiple times per frame`. MapKit on-end callbacks currently mutate parent bounds immediately, which can change camera annotations/clusters and feed back into the map within the same render pass. Coalesce settled viewport snapshots after layout, deduplicate unchanged quantized bounds, move query refresh to an asynchronous bounds-keyed task, cancel stale reports on driving transitions/disappearance, and anchor a resolved automatic planning camera so camera-data changes cannot continually reframe it. Verify latest-snapshot delivery, deduplication, cancellation, camera model/clustering tests, and simulator replay/cluster logs.
+
+Verified: `MapViewportReporter` coalesces snapshot delivery after 100 ms, deduplicates identical snapshots, preserves the one-second follow-report limit and cancels stale reports. Parent bounds only change when their quantized value changes; camera-data refresh uses `.task(id:)` instead of synchronous `.onChange`. A resolved automatic planning camera is anchored independently of camera annotations. Six new reporter tests plus camera model/clustering tests passed: **13 tests, zero failures/skips**. Release simulator and unsigned generic iOS builds passed. Synthetic motion and camera-cluster simulator runs were checked for per-frame state warnings; none were logged. Real-iPhone pan/zoom/route-start/End confirmation remains pending.
+
+## Speech unsafeForcedSync acceptance · 2026-10-27
+
+Before changing behavior: reproduced `Potential Structural Swift Concurrency Issue: unsafeForcedSync called from Swift Concurrent context` during simulator `--navigation-replay`. LLDB breakpoint `axUnsafeForcedSync` captured Apple AXCoreUtilities → TextToSpeech → SpeechAnnouncer voice lookup (`AVSpeechSynthesisVoice(language:)`) inside its post-activation MainActor Task. Schedule the final synchronous speech API calls on the main run loop outside a Swift task, retaining generation/mute/expiry checks at actual execution. Verify the scheduler has no current Swift task, Stop can cancel already-queued speech, existing audio-priority tests pass, and repeat the real replay/log inspection. No runtime-check suppression or private API is used by the app.
+
+Verified: `SpeechRunLoopScheduler` dispatches final voice/utterance/synthesizer work to the main queue. A regression test checks both MainActor confinement and `withUnsafeCurrentTask == nil`; additional controlled-scheduler tests verify cancellation after successful activation and camera priority while navigation waits for the run loop. Focused speech/audio/navigation tests passed: **18 methods / 20 executions, zero failures/skips**. Release simulator and unsigned generic iOS builds passed. Repeated the real `--navigation-replay` with Apple speech-engine loading: the earlier run logged two unsafeForcedSync warnings, while the updated process logged none (also no UI-unresponsiveness audio warnings in that process). Physical-iPhone disappearance of the warning remains to be confirmed after rebuilding; this simulator comparison is not a road/audio-routing acceptance claim.
+
+## Audio-session UI-thread warning acceptance · 2026-10-27
+
+Before implementation: remove explicit synchronous AVAudioSession activation/deactivation from MainActor. Use native asynchronous activation/deactivation on iOS 27+, with serialized off-main fallback on iOS 18–26. Preserve ducking and notify-others behavior. Activation/deactivation must finish in request order; Stop/mute/interrupt must invalidate speech waiting for activation. Camera cues must still expire/prioritize navigation, including during activation. Verify transition ordering, failures, redundant stop requests and pending-speech cancellation with injected audio sessions, plus existing speech/navigation tests. Physical-device disappearance of console warnings remains a separate check.
+
+Verified: new `SpeechAudioSession` backend uses a dedicated queue for category setup and older blocking APIs, and native asynchronous activation/deactivation on iOS 27+. A controller serializes completed transitions and skips redundant idle deactivation. Speech generations invalidate pending speech on Stop/mute/camera cancellation; camera priority/expiry includes activation time, and stale utterance callbacks cannot deactivate newer speech. The focused SpeechAudioSessionTests, CameraSpeechTests and NavigationModelTests passed: **15 test methods / 17 parameterized executions, zero failures/skips**. Release simulator and unsigned generic iOS builds passed. Tests inject audio transitions/playback and do not establish physical speaker/Bluetooth/interruption behavior or confirm disappearance of the warning on iOS 27; rebuild/run on the iPhone for that check.
+
+## iPhone route-start crash acceptance · 2026-10-27
+
+Before fixing: the paired iPhone's two route-start reports identify `EXC_BREAKPOINT` / `_dispatch_assert_queue_fail` → Swift executor isolation checking → `closure #1 in CoreMotionProvider.start()` on `RoadScout.device-motion`. Reproduce the native callback boundary from a background OperationQueue without real sensors; verify it converts readings off-main, hands values to the main actor, ignores nil/error callbacks and stopped-session deliveries, and keeps route-start/navigation tests passing. Build both configurations. Device reports establish the crash cause; physical-device success must be reported only if actually observed.
+
+Verified fix: native callback construction is now explicitly `nonisolated` and `@Sendable`, with only the converted `DrivingMotionSample` handed to MainActor. Generation validation still runs on MainActor to reject obsolete callbacks. Two regression tests invoke the actual production handler from a background OperationQueue using synthetic native CMDeviceMotion values and nil/error deliveries. The focused CoreMotionCallbackTests, DrivingMotionModelTests and NavigationModelTests passed: **11 tests, zero failures/skips**. Release simulator build and unsigned generic iOS device build passed. No fixed-build physical-device run was performed; rebuild/run on the iPhone to confirm startup there. Crash reports are retained only in the external temporary work directory, not in the repository.
+
+## API server Settings acceptance · 2026-10-27
+
+Before changing configuration: expose the RoadScout API base URL and reset action directly in main Settings, default to `https://roadscout.joswigchert.nl` in Debug and Release, preserve saved custom Debug overrides, retain HTTPS/redirect restrictions and Release's legacy LAN migration. Verify the configuration tests in both build configurations and simulator compilation.
+
+Verified: the three deterministic configuration tests passed in Debug and Release (Release test invocation uses `ENABLE_TESTABILITY=YES` for `@testable` imports). Debug's four opt-in LAN tests remain skipped. The Settings change compiled in both configurations. Public server reachability was not part of this configuration check.
+
 ## NAS deployment automation · 2026-10-27
 
 Acceptance was recorded before implementation in `nas-deployment.md`.

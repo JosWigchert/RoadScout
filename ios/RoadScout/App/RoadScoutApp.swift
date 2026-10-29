@@ -7,6 +7,8 @@ struct RoadScoutApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--search-preview") {
                 PlaceSearchFlowPreview()
+            } else if ProcessInfo.processInfo.arguments.contains("--traffic-preview") {
+                TrafficPreview()
             } else if ProcessInfo.processInfo.arguments.contains("--motion-preview") {
                 DrivingMotionPreview()
             } else if ProcessInfo.processInfo.arguments.contains("--camera-warning-preview") {
@@ -20,7 +22,9 @@ struct RoadScoutApp: App {
             } else if ProcessInfo.processInfo.arguments.contains("--driving-dashboard-preview") {
                 ContentView.navigationDashboardPreview(
                     unavailableSpeed: ProcessInfo.processInfo.arguments.contains("--missing-speed"),
-                    panned: ProcessInfo.processInfo.arguments.contains("--panned"))
+                     panned: ProcessInfo.processInfo.arguments.contains("--panned"))
+            } else if ProcessInfo.processInfo.arguments.contains("--route-progress-preview") {
+                ContentView.navigationDashboardPreview(progressPreview: true)
             } else if ProcessInfo.processInfo.arguments.contains("--live-scenic-preview") {
                 PlaceSearchFlowPreview(showDestination: true, profile: .scenic, liveRouting: true)
             } else if ProcessInfo.processInfo.arguments.contains("--live-corners-preview") {

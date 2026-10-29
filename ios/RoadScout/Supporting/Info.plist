@@ -19,7 +19,12 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>RoadScout uses your location to find nearby places and show distances while searching. During a drive, it shows your GPS speed, position and heading, and follows your selected route.</string>
+	<string>RoadScout uses your location to find nearby places. A drive you start continues using location for navigation and camera warnings when the screen is locked or another app is open, until you tap End.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>RoadScout connects to your self-hosted routing API when it is on your local network to calculate routes.</string>
 	<key>NSMotionUsageDescription</key>

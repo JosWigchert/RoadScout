@@ -53,12 +53,13 @@ struct DrivingRoute: Identifiable, Equatable, Sendable {
     let experiment: RouteExperiment?
     let weatherToken: String?
     let weatherExpiresAt: Date?
+    let traffic: RouteTrafficMetadata?
 
     init(geometry: [GeoPoint], distanceMeters: Double, durationSeconds: Double,
           maneuvers: [RouteManeuver], id: String = UUID().uuidString, timing: [RouteTimeAnchor] = [],
           language: String = "en-US", attribution: String = "© OpenStreetMap contributors",
           objective: RoutePlanningProfile? = nil, experiment: RouteExperiment? = nil,
-          weatherToken: String? = nil, weatherExpiresAt: Date? = nil) throws {
+          weatherToken: String? = nil, weatherExpiresAt: Date? = nil, traffic: RouteTrafficMetadata? = nil) throws {
         guard geometry.count >= 2, geometry.count <= 100_000, geometry.allSatisfy(\.isValid),
               distanceMeters.isFinite, distanceMeters > 0,
                durationSeconds.isFinite, durationSeconds >= 0, !maneuvers.isEmpty,
@@ -85,6 +86,7 @@ struct DrivingRoute: Identifiable, Equatable, Sendable {
         self.experiment = experiment
         self.weatherToken = weatherToken
         self.weatherExpiresAt = weatherExpiresAt
+        self.traffic = traffic
     }
 
     func elapsedSeconds(at meters: Double) -> Double {

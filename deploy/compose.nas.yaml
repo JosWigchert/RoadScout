@@ -11,10 +11,17 @@ services:
       LISTEN_ADDR: :8080
       ROUTING_PROVIDER: valhalla
       CAMERA_DATA_DIR: /data/cameras
+      TRAFFIC_CONFIG: /etc/roadscout/traffic.json
     volumes:
       - type: bind
         source: ${CAMERA_DATA_HOST_DIR:?Set persistent camera directory}
         target: /data/cameras
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TRAFFIC_CONFIG_HOST_FILE:-./traffic.config.example.json}
+        target: /etc/roadscout/traffic.json
+        read_only: true
         bind:
           create_host_path: false
     networks:

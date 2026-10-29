@@ -9,8 +9,10 @@ services:
       ENABLE_EXPERIMENTAL_ROUTING: ${ENABLE_EXPERIMENTAL_ROUTING:-0}
       VALHALLA_BASE_URL: ${VALHALLA_BASE_URL:-http://Valhalla:8002}
       CAMERA_DATA_DIR: /data/cameras
+      TRAFFIC_CONFIG: /etc/roadscout/traffic.json
     volumes:
       - ${CAMERA_DATA_HOST_DIR:-../backend/data/cameras}:/data/cameras:rw
+      - ${TRAFFIC_CONFIG_HOST_FILE:-./traffic.config.example.json}:/etc/roadscout/traffic.json:ro
     ports:
       - "8080:8080"
     networks:

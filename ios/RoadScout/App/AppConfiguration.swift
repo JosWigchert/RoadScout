@@ -6,18 +6,14 @@ enum AppConfiguration {
     static let localTestingRoutingAPIBaseURL = "http://192.168.1.157:8080"
 
     static var routingAPIBaseURL: String {
-        #if DEBUG
-        localTestingRoutingAPIBaseURL
-        #else
         productionRoutingAPIBaseURL
-        #endif
     }
 
     static func migratedRoutingAPIURL(_ savedValue: String) -> String {
         let saved = savedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !saved.isEmpty else { return routingAPIBaseURL }
         #if DEBUG
-        return saved == productionRoutingAPIBaseURL ? routingAPIBaseURL : saved
+        return saved
         #else
         return saved == localTestingRoutingAPIBaseURL ? productionRoutingAPIBaseURL : saved
         #endif

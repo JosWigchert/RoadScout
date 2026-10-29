@@ -36,6 +36,8 @@ Acceptance checks:
 
 ## Verification
 
+Device-only startup correction: actual iPhone crash reports showed Swift 6 inferring MainActor isolation for the legacy Core Motion callback supplied to a background OperationQueue. The adapter now constructs that handler in a nonisolated factory with an explicit `@Sendable` closure, converts the native reading off-main, then delivers only a Sendable sample to MainActor. Background-queue regression tests exercise this exact factory, including nil/error callbacks. Session-generation checks remain on MainActor. See `testing.md` for focused results and remaining device confirmation.
+
 Deterministic tests cover constant-speed frame spacing, acceleration/braking, longitudinal projection, north crossing, stationary jitter, handling, magnetic/reference fallback, sensor dropout, two-second freeze, smooth GPS correction, relocation confirmation, delayed/invalid inputs, course/speed accuracy, dateline crossing, lifecycle/stale callbacks and separation from measured fixes/speed. Navigation tests cover first-of-multiple-route adoption, return-to-route cancellation, outside-route signal gaps, retained objective/budget/preferences and ended-session response rejection.
 
 The Debug full test suite and Release simulator build passed. Simulator synthetic motion appearance was inspected with `--motion-preview` (1 Hz GPS, ~50 Hz synthetic motion); these are invented trajectories, not validated road geometry or real sensor measurements. See `testing.md` for final counts.

@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "enableRouting": false,
+  "bridgeURL": "",
+  "maxMatchesPerSync": 50,
+  "providers": [
+    {
+      "id": "ndw-nl",
+      "adapter": "ndw-datex3",
+      "countries": ["NL"],
+      "enabled": true,
+      "eventsURL": "https://opendata.ndw.nu/actueel_beeld.xml.gz",
+      "sitesURL": "https://opendata.ndw.nu/reistijden_configuratie_meetlocaties.xml.gz",
+      "measurementsURL": "https://opendata.ndw.nu/reistijden_meetgegevens.xml.gz",
+      "attribution": "Traffic data: NDW · CC0 unless stated otherwise",
+      "priority": 100,
+      "pollSeconds": 60,
+      "maxAgeSeconds": 180,
+      "credentialEnv": ""
+    }
+  ]
+}

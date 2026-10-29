@@ -7,8 +7,10 @@ final class TestLocationProvider: LocationProviding {
     var onEvent: ((LocationEvent) -> Void)?
     var starts = 0
     var stops = 0
+    var backgroundStates: [Bool] = []
     func start() { starts += 1 }
     func stop() { stops += 1 }
+    func setBackgrounded(_ backgrounded: Bool) { backgroundStates.append(backgrounded) }
     func send(_ event: LocationEvent) { onEvent?(event) }
 }
 
@@ -63,14 +65,45 @@ struct DrivingModelTests {
         model.stop()
     }
 
-    @Test func backgroundStopsCollectionAndRequiresExplicitRestart() {
+    @Test func liveDriveContinuesInBackgroundAndForegroundDoesNotRestartProvider() {
         let provider = TestLocationProvider()
         let model = DrivingModel(makeProvider: { _ in provider })
         model.start(source: .live)
         model.enterBackground()
+        #expect(model.isDriving)
+        #expect(model.isBackgrounded)
+        #expect(provider.stops == 0)
+        #expect(provider.backgroundStates == [true])
+        model.enterForeground()
+        #expect(!model.isBackgrounded)
+        #expect(provider.starts == 1)
+        #expect(provider.backgroundStates == [true, false])
+        model.stop()
+        #expect(provider.stops == 1)
+    }
+
+    @Test func demosStopInBackgroundAndForegroundNeverRestartsStoppedSession() {
+        let provider = TestLocationProvider()
+        let model = DrivingModel(makeProvider: { _ in provider })
+        model.start(source: .replay)
+        model.enterBackground()
         #expect(!model.isDriving)
         #expect(model.status == .backgroundStopped)
         #expect(provider.stops == 1)
+        model.enterForeground()
+        #expect(provider.starts == 1)
+        #expect(!model.isDriving)
+    }
+
+    @Test func sessionCannotBeStartedWhileAlreadyBackgrounded() {
+        let provider = TestLocationProvider()
+        let model = DrivingModel(makeProvider: { _ in provider })
+        model.enterBackground()
+        model.start(source: .live)
+        #expect(provider.starts == 0)
+        #expect(!model.isDriving)
+        model.enterForeground()
+        #expect(provider.starts == 0)
     }
 
     @Test func failureAndReplayCompletionClearSpeed() {

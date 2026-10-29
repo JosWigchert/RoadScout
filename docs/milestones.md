@@ -1,5 +1,37 @@
 # Milestones
 
+## Dutch traffic staging preparation · 2026-10-29
+
+NDW v3 source ingestion, normalized Go traffic endpoints and iPhone incident/congestion map overlays are ready for staging evaluation. Native Valhalla traffic costs remain disabled until the staging bridge is independently deployed and verified. Live NDW ingestion/isolated local API, Go race/vet and the full Debug suite passed; synthetic traffic UI inspected. NAS Compose staging configuration renders, but no NAS deployment was performed here. See `traffic.md`, `traffic-api.md` and `traffic-valhalla-handoff.md`.
+
+## Background-driving lifecycle and traveled-route appearance · 2026-10-28
+
+Implemented the Phase 5 background/locked-driving slice: foreground-started When In Use sessions keep GPS with a visible background indicator, while visual motion/compass/timers suspend. A retained callback-driven coordinator handles navigation start/progress/rerouting/arrival and camera data/audio without requiring view updates; foreground recovery retains route/progress and fresh-seeds motion. End/permission loss stops the pipeline; demos still stop on backgrounding. Added location/audio modes and updated purpose/privacy text. No Always permission or automatic restart is introduced.
+
+The selected route now fades traveled geometry to translucent gray and retains blue remaining geometry, using validated shape progress and a shared interpolated cut point. Planning/reroutes reset prominence. Pure geometry tests cover boundaries, mismatched engine distance and dateline crossing; `--route-progress-preview` was visually inspected with synthetic geometry.
+
+Full Debug tests passed for background integration; the final background/route-geometry-focused run passed 11 tests, zero failures. Release arm64 simulator (`ONLY_ACTIVE_ARCH=YES`) and unsigned Release iPhone-target builds passed; processed plists contain location/audio modes. The earlier universal simulator Release invocation timed out during x86_64 optimization. Physical locked-screen/road/audio/energy acceptance remains pending; see `phase-5-background.md`.
+
+## Coalesced map viewport updates · 2026-10-27
+
+Replaced synchronous bounds feedback from MapKit callbacks with a cancellable 100 ms latest-viewport reporter, quantized bounds deduplication and async bounds-keyed camera queries. Anchored the initial automatic planning camera so annotation changes cannot continually reframe it; retained the follow-camera report limit. Thirteen focused viewport/camera tests passed; Release simulator and unsigned iOS builds passed. Synthetic motion/cluster logs showed no per-frame state warning. iPhone interaction confirmation remains pending.
+
+## Speech framework forced-sync warning · 2026-10-27
+
+Reproduced the warning in a real simulator navigation replay and captured its stack: Apple TextToSpeech voice lookup synchronously bridges internally when called from the post-activation Swift task. Final speech calls now run through an injected main-run-loop scheduler outside task context, with generation/mute/expiry checks repeated at execution. Eighteen focused test methods (20 executions) passed, along with Release simulator and unsigned iOS builds. Repeating the same native-speech replay produced no unsafeForcedSync warning, compared with two before the fix. iPhone confirmation remains pending.
+
+## Nonblocking speech audio-session transitions · 2026-10-27
+
+Replaced MainActor AVAudioSession activation/deactivation with native asynchronous APIs on iOS 27+ and an off-main fallback on iOS 18–26. Serialized transition completion, suppressed redundant idle deactivation, and added pending-speech cancellation/priority safeguards for Stop, mute and camera warnings. Fifteen focused audio/camera-speech/navigation test methods (17 executions) passed; Release simulator and unsigned iOS device-target builds passed. On-device console/audio/Bluetooth/interruption acceptance remains pending.
+
+## iPhone route-start crash correction · 2026-10-27
+
+Two physical iPhone crash reports confirmed a Swift 6 actor-isolation trap in the live Core Motion callback on its background operation queue. Moved native callback creation to an explicitly nonisolated/Sendable boundary and retained value-only MainActor delivery plus session-generation checks. The actual callback is now covered by background-queue synthetic native-reading/error regression tests. Eleven focused callback/motion/navigation tests passed; Release simulator and unsigned generic iOS builds passed. A fixed-build iPhone startup retry is still required; real-road motion acceptance remains open.
+
+## Main Settings API configuration · 2026-10-27
+
+Moved the shared Go API base URL/reset action from Demo & Testing to **Settings → RoadScout API**. Both build configurations default to `https://roadscout.joswigchert.nl`. Saved custom Debug overrides remain intact; Release retains HTTPS-only policy and legacy LAN migration. The three deterministic configuration tests passed in Debug/Release; both Settings builds compiled.
+
 ## NAS deployment workflow · 2026-10-27
 
 Added manual staging/production GitHub Actions deployment on self-hosted Unraid, target concurrency/GitHub environments, commit-tagged local images, NAS-owned configuration and camera mounts, unique Traefik routing, Docker health/Valhalla readiness gates and deployment summaries. Single-container recreation preserves one camera writer per target. Acceptance and setup: `nas-deployment.md`. Shell syntax, YAML parsing, Compose v2 rendering and simulated success/build/health/readiness failure paths passed. Real NAS container deployment, public HTTPS and route checks remain pending.
@@ -65,9 +97,9 @@ Signing refinement: app/test bundle identifiers now use `nl.joswigchert.roadscou
 | 0 · Repository and build foundation | Verified: simulator build, fixture test and credential-free launch |
 | 1 · Free drive | Implemented; build, deterministic tests and simulator presentation verified; physical-device acceptance pending |
 | 2 · Go API + Valhalla navigation | Implemented; local Go → NAS Valhalla and simulator transport verified; public deployment/full coverage/device acceptance pending |
-| 3 · Camera alerts | Planned |
+| 3 · Camera alerts | Implemented and fixture/live-API verified; physical alerts/coverage acceptance pending |
 | 4 · Roof Down Mode | Planning-only implementation verified in simulator/live API; KNMI and device/road acceptance pending |
-| 5 · Real-world hardening | Planned |
+| 5 · Real-world hardening | Background/locked lifecycle implemented and deterministic/build verified; physical drives, energy, audio routing and accessibility acceptance pending |
 | 6 · Scenic / Most Corners | Early owner-prioritized candidate-ranking prototype verified; custom/global optimization and field acceptance pending |
 | 7 · Entitled CarPlay | Planned |
 | 8 · Shared Go services | Planned |

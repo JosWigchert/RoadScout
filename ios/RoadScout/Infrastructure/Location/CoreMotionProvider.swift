@@ -30,7 +30,20 @@ import Foundation
         manager.deviceMotionUpdateInterval = 1.0 / 50
         manager.showsDeviceMovementDisplay = false
         let token = generation
-        manager.startDeviceMotionUpdates(using: frame, to: queue) { [weak self] motion, _ in
+        manager.startDeviceMotionUpdates(using: frame, to: queue,
+            withHandler: Self.makeDeviceMotionHandler(northReferenced: northReferenced) { [weak self] sample in
+                guard let self, self.generation == token else { return }
+                self.onSample?(sample)
+            })
+    }
+
+    /// Core Motion's Objective-C handler is not annotated Sendable and runs on
+    /// the supplied OperationQueue. A closure created directly in start() inherits
+    /// MainActor isolation under Swift 6 and traps on the first physical-device callback.
+    /// Construct it nonisolated, explicitly Sendable, and cross actors only with values.
+    nonisolated static func makeDeviceMotionHandler(northReferenced: Bool,
+        deliver: @escaping @MainActor @Sendable (DrivingMotionSample) -> Void) -> CMDeviceMotionHandler {
+        { @Sendable motion, _ in
             guard let motion else { return }
             let r = motion.attitude.rotationMatrix
             let a = motion.userAcceleration
@@ -47,10 +60,7 @@ import Foundation
                 rotationMagnitude: sqrt(pow(motion.rotationRate.x, 2) + pow(motion.rotationRate.y, 2) + pow(motion.rotationRate.z, 2)),
                 gravityX: motion.gravity.x, gravityY: motion.gravity.y, gravityZ: motion.gravity.z,
                 verticalAcceleration: -(a.x * motion.gravity.x + a.y * motion.gravity.y + a.z * motion.gravity.z) * 9.80665)
-            Task { @MainActor [weak self] in
-                guard let self, self.generation == token else { return }
-                self.onSample?(sample)
-            }
+            Task { @MainActor in deliver(sample) }
         }
     }
 

@@ -94,6 +94,7 @@ struct RoadScoutRoutingProvider: RoutingProviding {
 
     private struct Response: Decodable { let routes: [Route]; let attributions: [String] }
     private struct Route: Decodable {
+        struct Traffic: Decodable { let value: RouteTrafficMetadata?; init(from decoder: Decoder) { value = try? RouteTrafficMetadata(from: decoder) } }
         struct Summary: Decodable { let distanceMeters: Double; let durationSeconds: Double }
         struct Geometry: Decodable { let encoding: String; let dimensions: Int; let pointCount: Int; let data: String }
         struct Timing: Decodable { let method: String; let anchors: [RouteTimeAnchor] }
@@ -114,6 +115,7 @@ struct RoadScoutRoutingProvider: RoutingProviding {
         let experiment: RouteExperiment?
         let weatherToken: String?
         let weatherExpiresAt: String?
+        let traffic: Traffic?
 
         func model(attribution: String) throws -> DrivingRoute {
             guard geometry.encoding == "polyline6", geometry.dimensions == 2, !legs.isEmpty,
@@ -145,7 +147,7 @@ struct RoadScoutRoutingProvider: RoutingProviding {
                                     id: id, timing: timing.anchors, language: language, attribution: attribution,
                                     objective: objective.map(RoutePlanningProfile.init(rawValue:)), experiment: experiment,
                                     weatherToken: weatherToken.flatMap { $0.isEmpty ? nil : $0 },
-                                    weatherExpiresAt: WeatherWireDate.parse(weatherExpiresAt))
+                                    weatherExpiresAt: WeatherWireDate.parse(weatherExpiresAt), traffic: traffic?.value)
         }
     }
 }

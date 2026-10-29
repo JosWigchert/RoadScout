@@ -11,7 +11,36 @@ import Observation
     private(set) var isLoading = false
     private(set) var message: String?
     private(set) var isFreeDriving = false
-    var muted = false { didSet { if muted { audio.stop() } } }
+    var muted = false { didSet { if muted { audio.stop() }; onMuteChanged?(muted) } }
+    @ObservationIgnored var onRouteChanged: (() -> Void)?
+    @ObservationIgnored var onMuteChanged: ((Bool) -> Void)?
+    @ObservationIgnored private var trafficETA: (routeID: String, seconds: Double, elapsed: Double, expires: Date)?
+
+    func applyTrafficETA(routeID: String, seconds: Double, expiresAt: Date) {
+        guard selectedRoute?.id == routeID, let route = selectedRoute, let progress,
+              seconds.isFinite, seconds >= 0, expiresAt > now() else { return }
+        trafficETA = (routeID, seconds, route.elapsedSeconds(at: progress.traveledMeters), expiresAt)
+        self.progress = trafficAdjusted(progress)
+    }
+
+    private func trafficAdjusted(_ value: NavigationProgress) -> NavigationProgress {
+        guard let estimate = trafficETA, let route = selectedRoute, route.id == estimate.routeID,
+              estimate.expires > now(), !value.arrived else { return value }
+        return NavigationProgress(traveledMeters: value.traveledMeters, remainingMeters: value.remainingMeters,
+            remainingSeconds: max(0, estimate.seconds - max(0, route.elapsedSeconds(at: value.traveledMeters) - estimate.elapsed)),
+            maneuverIndex: value.maneuverIndex, maneuverDistance: value.maneuverDistance,
+            offRoute: value.offRoute, arrived: value.arrived, onRoute: value.onRoute)
+    }
+
+    /// A traffic offer has already been revalidated from fresh GPS against its corridor.
+    func adoptTrafficAlternative(_ route: DrivingRoute, fix: LocationFix) {
+        guard isNavigating, !isPaused, fix.hasUsablePosition(at: now()),
+              GeoPoint(latitude: fix.latitude, longitude: fix.longitude).distance(to: route.geometry[0]) <= 50 else { return }
+        cancelRequest(); audio.stop(); trafficETA = nil
+        routes = [route]; selectedRoute = route; tracker = NavigationTracker(route: route)
+        progress = nil; announced = []; lastSpokenAt = nil
+        consume(fix); onRouteChanged?()
+    }
     @ObservationIgnored private let audio: any AudioAnnouncing
     @ObservationIgnored private let provider: (String) throws -> any RoutingProviding
     @ObservationIgnored private let now: () -> Date
@@ -109,6 +138,7 @@ import Observation
         guard !isNavigating, routes.contains(where: { $0.id == route.id }) else { return }
         selectedRoute = route
         if let objective = route.objective { self.objective = objective }
+        onRouteChanged?()
     }
 
     func selectDestination(_ destination: Destination, fix: LocationFix?, endpoint: String, preferences: RoutePreferences) {
@@ -182,12 +212,14 @@ import Observation
     }
 
     func end() {
+        trafficETA = nil
         cancelRequest(); audio.stop(); isNavigating = false; isPaused = false
         routes = []; selectedRoute = nil; destination = nil; progress = nil; tracker = nil
         message = nil; lastReroute = nil; rerouteDelay = 15; announced = []; lastSpokenAt = nil
         isFreeDriving = false
         objective = .fastest
         maxExtraDurationPercent = 30
+        onRouteChanged?()
     }
 
     func consume(_ fix: LocationFix?) {
@@ -195,7 +227,8 @@ import Observation
         guard let fix, fix.hasUsablePosition(at: now()) else {
             audio.stop(); message = String(localized: "GPS unavailable. Guidance paused until position recovers."); return
         }
-        guard let update = tracker?.update(fix, at: now()) else { return }
+        guard let rawUpdate = tracker?.update(fix, at: now()) else { return }
+        let update = trafficAdjusted(rawUpdate)
         progress = update
         if update.arrived {
             cancelRequest()
@@ -238,6 +271,7 @@ import Observation
         end()
         routes = try RoadScoutRoutingProvider.decode(Data(contentsOf: url)); selectedRoute = routes.first
         if let point = routes.first?.geometry.last { destination = Destination(name: String(localized: "Synthetic navigation demo"), point: point) }
+        onRouteChanged?()
     }
 
     private func calculate(fix: LocationFix, rerouting: Bool) {
@@ -262,8 +296,10 @@ import Observation
                 guard let self, token == current else { return }
                 guard !result.isEmpty else { throw RoutingError.noRoute }
                 routes = result; selectedRoute = result[0]; progress = nil; tracker = NavigationTracker(route: result[0])
+                trafficETA = nil
                 rerouteInFlight = false
                 isLoading = false; message = nil; rerouteDelay = 15; announced = []
+                onRouteChanged?()
             } catch {
                 guard let self, token == current else { return }
                 isLoading = false
