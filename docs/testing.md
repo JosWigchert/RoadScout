@@ -1,5 +1,9 @@
 # Testing
 
+## NAS traffic mount regression · 2026-10-29
+
+Default NAS Compose rendering has no traffic bind mount and an empty container `TRAFFIC_CONFIG`; built-in NDW defaults are verified enabled with traffic routing disabled. An optional absolute host override renders as a read-only bind and sets the in-container config path. `TestNASDeploymentTrafficOverride` simulates default/override deployment, rejects relative paths, and checks a failed Docker-host readability probe prevents `up`. `go test -race -timeout 90s ./...`, `go vet ./...`, shell syntax, both actual Compose renders and `git diff --check` passed. The Docker daemon/NAS was not available here; actual staging deployment must be rerun on the NAS after committing/pushing the fix.
+
 ## Dutch traffic staging verification · 2026-10-29
 
 Full Debug simulator build/test passed: XCResult reports 187 methods (183 passed, 4 opt-in live skips), 215 passed parameterized executions, zero failures. Go `go test -race -timeout 90s ./...` and `go vet ./...` passed. Release arm64 simulator build passed after the final Swift edits. NAS Compose config rendered with `docker-compose`; the Docker daemon was unavailable for container deployment.

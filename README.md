@@ -195,7 +195,7 @@ Viewport-driven camera queries settle for 100 ms and skip unchanged quantized bo
 
 The Go API imports NDW DATEX II v3 events and travel times. The iPhone can show reported incidents/closures and matched congestion on the map; Settings → Live traffic shows the source and whether traffic routing is available. Road matching warms gradually and coverage is partial. Missing/stale data is not treated as free flow. `--traffic-preview` is a synthetic UI preview, not live conditions.
 
-The included NAS traffic config defaults to `enableRouting: false`. Traffic-aware ETA, route choices and timed faster-route offers require the separate, graph-matched Valhalla updater described in `docs/traffic-valhalla-handoff.md`; they remain unavailable until deployed and verified. Set Settings → RoadScout API to the staging HTTPS URL when testing. See `docs/traffic-api.md` and `docs/nas-deployment.md` for configuration and limits.
+The NAS API uses built-in NDW defaults with traffic routing disabled; no runner-checkout traffic bind mount is needed. An optional absolute Docker-host config path can be set with `TRAFFIC_CONFIG_HOST_FILE`. Traffic-aware ETA, route choices and timed faster-route offers require the separate, graph-matched Valhalla updater described in `docs/traffic-valhalla-handoff.md`; they remain unavailable until deployed and verified. Set Settings → RoadScout API to the staging HTTPS URL when testing. See `docs/traffic-api.md` and `docs/nas-deployment.md` for configuration and limits.
 
 Camera data comes **only from the Go API**, through one `POST /v1/cameras` endpoint. The app does not bundle a camera dataset.
 

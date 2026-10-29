@@ -15,6 +15,20 @@ import (
 func trafficXMLFixture(at time.Time, body string) string {
 	return `<messageContainer xmlns="http://datex2.eu/schema/3/messageContainer" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><publicationTime>` + at.Format(time.RFC3339) + `</publicationTime>` + body + `</messageContainer>`
 }
+
+func TestTrafficDefaultConfigWorksWithoutMountedFile(t *testing.T) {
+	config, err := loadTrafficConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.Enabled || config.EnableRouting || config.BridgeURL != "" || len(config.Providers) != 1 {
+		t.Fatalf("unexpected built-in traffic defaults: %+v", config)
+	}
+	provider := config.Providers[0]
+	if !provider.Enabled || provider.ID != "ndw-nl" || provider.Adapter != "ndw-datex3" || provider.EventsURL == "" || provider.SitesURL == "" || provider.MeasurementsURL == "" {
+		t.Fatalf("NDW defaults are incomplete: %+v", provider)
+	}
+}
 func TestTrafficDATEX3JoinsVersionsAndKeepsObservationTime(t *testing.T) {
 	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
 	sites := trafficXMLFixture(now, `<measurementSite id="site" version="2"><measurementSpecificCharacteristics index="1"><specificMeasurementValueType>travelTimeInformation</specificMeasurementValueType></measurementSpecificCharacteristics><gmlLineString><posList>52 5 52.001 5</posList></gmlLineString></measurementSite>`)

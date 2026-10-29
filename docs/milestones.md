@@ -1,5 +1,9 @@
 # Milestones
 
+## NAS traffic bind-mount fix · 2026-10-29
+
+Removed the default runner-checkout traffic bind mount that failed with a containerized runner and host Docker daemon. NAS deployments now use built-in NDW defaults; optional absolute Docker-host overrides use a read-only Compose overlay and a daemon-side readability check before service replacement. Default/override Compose rendering, simulated deployment failure handling, Go race tests/vet and shell checks passed. Actual staging deployment remains to be rerun on the NAS.
+
 ## Dutch traffic staging preparation · 2026-10-29
 
 NDW v3 source ingestion, normalized Go traffic endpoints and iPhone incident/congestion map overlays are ready for staging evaluation. Native Valhalla traffic costs remain disabled until the staging bridge is independently deployed and verified. Live NDW ingestion/isolated local API, Go race/vet and the full Debug suite passed; synthetic traffic UI inspected. NAS Compose staging configuration renders, but no NAS deployment was performed here. See `traffic.md`, `traffic-api.md` and `traffic-valhalla-handoff.md`.
