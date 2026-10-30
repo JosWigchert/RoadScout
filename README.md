@@ -25,6 +25,8 @@ Verified: LAN readiness/real routing, simulator URLSession route request, Debug 
 
 ## Command-line verification
 
+Traffic refresh correction (2026-10-30): the app reuses buffered query areas for small pans and refreshes covered areas at most once per minute, without replaying disk cache over current overlays. Partial responses retain only still-fresh missing records. Congestion lines thin at overview zoom; closures use a dashed dark-red line. The accompanying Go fix excludes invisible normal/unmatched flow from the map response budget (but still queues congested unmatched roads for matching). Deploy the updated API to staging before live acceptance; cached traffic is never kept beyond its freshness deadline, and this does not enable offline routing.
+
 From the repository root (Xcode 27 used during development):
 
 ```sh
@@ -193,7 +195,7 @@ Viewport-driven camera queries settle for 100 ms and skip unchanged quantized bo
 
 ## Dutch traffic · staging
 
-The Go API imports NDW DATEX II v3 events and travel times. The iPhone can show reported incidents/closures and matched congestion on the map; Settings → Live traffic shows the source and whether traffic routing is available. Road matching warms gradually and coverage is partial. Missing/stale data is not treated as free flow. `--traffic-preview` is a synthetic UI preview, not live conditions.
+The Go API imports NDW DATEX II v3 events and travel times. The iPhone groups nearby cameras and point events (roadworks/incidents) into counted map clusters; grouping uses a fixed zoom-aware grid so panning does not reshuffle markers, and closure endpoint icons hide when zoomed out. Tapping a cluster zooms in, while individual markers open their details. Matched congestion is drawn as **yellow (slow) or red (heavy)** road segments, and closures use a thin red connecting line with **no-entry markers at both ends**. Traffic overlays are cached locally, loaded cache-first and merged incrementally, so recently viewed areas remain available offline. Settings → Live traffic shows the source and whether traffic routing is available. Road matching warms gradually and coverage is partial. Missing/stale data is not treated as free flow. `--traffic-preview` is a synthetic UI preview, not live conditions.
 
 The NAS API uses built-in NDW defaults with traffic routing disabled; no runner-checkout traffic bind mount is needed. An optional absolute Docker-host config path can be set with `TRAFFIC_CONFIG_HOST_FILE`. Traffic-aware ETA, route choices and timed faster-route offers require the separate, graph-matched Valhalla updater described in `docs/traffic-valhalla-handoff.md`; they remain unavailable until deployed and verified. Set Settings → RoadScout API to the staging HTTPS URL when testing. See `docs/traffic-api.md` and `docs/nas-deployment.md` for configuration and limits.
 
@@ -201,7 +203,7 @@ Camera data comes **only from the Go API**, through one `POST /v1/cameras` endpo
 
 - Go keeps a persistent snapshot in `CAMERA_DATA_DIR` (Docker: `/data/cameras`). A background task in the same container checks OpenStreetMap every six hours, reconciles by stable OSM IDs, writes atomically and keeps the last known-good snapshot on failure. Image updates do not erase the bind-mounted folder.
 - The snapshot currently contains **936 mapped cameras** and **76 average-speed zones** (65 with verified connected geometry, 11 incomplete). Coverage is the Netherlands and is explicitly incomplete; mapped records do not confirm active enforcement.
-- The app shows a camera dot with a white ring and a short **direction beam** for known enforcement travel direction. Nearby cameras are grouped into **counted clusters** when the map is dense; tapping a cluster zooms in, and tapping an individual camera opens a card with its mapped limit and heading.
+- The app shows a camera dot with a white ring and a short **direction beam** for known enforcement travel direction. Nearby cameras and point traffic events are grouped into **counted clusters** when the map is dense; tapping a cluster zooms in, and tapping an individual camera opens a card with its mapped limit and heading.
 - A warning strip appears above the driving dashboard. Average-speed zones use purple dashed geometry and start/end markers; average-speed calculation is deferred.
 - Settings → Cameras controls visibility, audio and warning distance, and shows coverage, last check/change/source timestamps, attribution and stale status.
 - Route preview and navigation request cameras for the route corridor; free drive requests a bounded area around the current position. The app caches fetched query areas for network gaps only; it does not claim uncached offline coverage.

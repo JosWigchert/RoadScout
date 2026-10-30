@@ -98,12 +98,6 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let routeGeometry = navigation.selectedRoute.map {
-                RouteProgressGeometry(route: $0, traveledMeters: model.isDriving ? navigation.progress?.traveledMeters : nil)
-            }
-            let trafficFeatures = showLiveTraffic ? TrafficDisplayFeature.make(traffic.visibleFeatures,
-                route: navigation.selectedRoute, traveled: model.isDriving ? (navigation.progress?.traveledMeters ?? 0) : 0,
-                center: cameraBounds?.center) : []
             ZStack(alignment: .bottom) {
                 DrivingMapSurface(position: $camera, following: $following, driving: model.isDriving,
                     motion: model.motion, fix: model.fix, source: model.source, fallbackHeading: model.heading,
@@ -111,63 +105,7 @@ struct ContentView: View {
                         lastMapCamera = snapshot.camera
                         if cameraBounds != snapshot.bounds { cameraBounds = snapshot.bounds }
                     }) {
-                    if !model.isDriving {
-                        ForEach(navigation.routes.filter { $0.id != navigation.selectedRoute?.id }) { route in
-                            MapPolyline(coordinates: route.geometry.map(\.coordinate))
-                                .stroke(.gray.opacity(0.75), lineWidth: 5)
-                        }
-                    }
-                    TrafficMapContent(features: trafficFeatures.filter { $0.feature.kind == "flow" && $0.feature.routeStartMeters == nil }, select: { selectedTraffic = $0 })
-                    if showLiveTraffic, let offer = traffic.offer {
-                        MapPolyline(coordinates: offer.route.geometry.map(\.coordinate))
-                            .stroke(.purple.opacity(0.8), style: StrokeStyle(lineWidth: 5, dash: [8, 5]))
-                    }
-                    if let routeGeometry {
-                        RouteMapContent(geometry: routeGeometry)
-                    }
-                    TrafficMapContent(features: trafficFeatures.filter { $0.feature.kind != "flow" || $0.feature.routeStartMeters != nil }, select: { selectedTraffic = $0 })
-                    if camerasEnabled {
-                        CameraMapContent(cameras: cameraAlerts.cameras, zones: cameraAlerts.zones,
-                                         bounds: cameraBounds,
-                                         selectCamera: { selectedCamera = $0 },
-                                          selectCluster: { zoom(to: $0) })
-                    }
-                    if !model.isDriving, showRoofDownWeather,
-                       let route = navigation.selectedRoute,
-                       let response = weather.state(for: route).response, response.hasRainRisk {
-                        WeatherMapContent(response: response)
-                    }
-                    if !model.isDriving, selectedPlace != nil {
-                        if let origin = routePlanner.customOrigin {
-                            Marker(origin.name, systemImage: "circle.fill", coordinate: origin.coordinate).tint(.gray)
-                        }
-                        ForEach(Array(navigation.routes.enumerated()), id: \.element.id) { index, route in
-                            Annotation("Route option", coordinate: PlaceMapFocus.labelPoint(on: route, fraction: min(0.8, 0.35 + Double(index) * 0.25)).coordinate) {
-                                Button { navigation.select(route) } label: {
-                                    Text("\(max(1, Int(ceil(route.durationSeconds / 60)))) min")
-                                        .font(.caption.bold()).padding(8)
-                                        .foregroundStyle(navigation.selectedRoute?.id == route.id ? Color.white : Color.primary)
-                                        .background(navigation.selectedRoute?.id == route.id ? Color.blue : Color(.secondarySystemBackground),
-                                                    in: RoundedRectangle(cornerRadius: 12))
-                                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(RoutePresentation.title(for: route, in: navigation.routes))
-                            }
-                            .annotationTitles(.hidden)
-                        }
-                    }
-                    if let destination = selectedPlace ?? navigation.destination {
-                        Marker(destination.name, systemImage: destination.symbol ?? "mappin", coordinate: destination.point.coordinate)
-                            .tint(PlaceCategoryStyle.color(for: destination.symbol))
-                    }
-                    if model.fix == nil, let point = planningLocation.currentPoint {
-                        Annotation("Your position", coordinate: point.coordinate) {
-                            Circle().fill(.blue).frame(width: 14, height: 14)
-                                .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                        }
-                        .annotationTitles(.hidden)
-                    }
+                    mapLayers()
                 }
                 .ignoresSafeArea()
 
@@ -298,8 +236,11 @@ struct ContentView: View {
                 if let destination { selectDestination(destination) }
             }
             .onChange(of: drawerDetent) { _, detent in
-                if detent == .half, selectedPlace != nil, !routePlanner.isEditingOrigin,
-                   let route = navigation.selectedRoute, !model.isDriving {
+                let isHalf = detent == .half
+                let hasPlace = selectedPlace != nil
+                let isEditingOrigin = routePlanner.isEditingOrigin
+                let isDriving = model.isDriving
+                if isHalf, hasPlace, !isEditingOrigin, !isDriving, let route = navigation.selectedRoute {
                     focusRoute(route, viewport: geometry.size)
                 }
             }
@@ -477,9 +418,81 @@ struct ContentView: View {
         .padding(.bottom, 8)
     }
 
-    private func zoom(to cluster: CameraCluster) {
+    @MapContentBuilder
+    private func mapLayers() -> some MapContent {
+        let routeGeometry = navigation.selectedRoute.map {
+            RouteProgressGeometry(route: $0, traveledMeters: model.isDriving ? navigation.progress?.traveledMeters : nil)
+        }
+        let trafficFeatures = showLiveTraffic ? TrafficDisplayFeature.make(traffic.visibleFeatures,
+            route: navigation.selectedRoute, center: cameraBounds?.center) : []
+        let flowFeatures = trafficFeatures.filter { $0.feature.kind == "flow" }
+        let closureFeatures = trafficFeatures.filter { $0.feature.kind == "closure" }
+        let pointFeatures = trafficFeatures.filter { $0.feature.kind != "flow" && $0.feature.kind != "closure" }
+        let overlayCameras = camerasEnabled ? cameraAlerts.cameras : []
+        let overlayEvents = showLiveTraffic ? pointFeatures.map(\.feature) : []
+        let overlayZones = camerasEnabled ? cameraAlerts.zones : []
+
+        if !model.isDriving {
+            ForEach(navigation.routes.filter { $0.id != navigation.selectedRoute?.id }) { route in
+                MapPolyline(coordinates: route.geometry.map(\.coordinate))
+                    .stroke(.gray.opacity(0.75), lineWidth: 5)
+            }
+        }
+        if showLiveTraffic, let offer = traffic.offer {
+            MapPolyline(coordinates: offer.route.geometry.map(\.coordinate))
+                .stroke(.purple.opacity(0.8), style: StrokeStyle(lineWidth: 5, dash: [8, 5]))
+        }
+        MapTrafficLayers(routeGeometry: routeGeometry,
+                         flowFeatures: flowFeatures,
+                         closureFeatures: closureFeatures,
+                         cameras: overlayCameras,
+                         events: overlayEvents,
+                         zones: overlayZones,
+                         bounds: cameraBounds,
+                         selectCamera: { selectedCamera = $0 },
+                         selectTraffic: { selectedTraffic = $0 },
+                         selectCluster: { zoom(to: $0) })
+        if !model.isDriving, showRoofDownWeather,
+           let route = navigation.selectedRoute,
+           let response = weather.state(for: route).response, response.hasRainRisk {
+            WeatherMapContent(response: response)
+        }
+        if !model.isDriving, selectedPlace != nil {
+            if let origin = routePlanner.customOrigin {
+                Marker(origin.name, systemImage: "circle.fill", coordinate: origin.coordinate).tint(.gray)
+            }
+            ForEach(Array(navigation.routes.enumerated()), id: \.element.id) { index, route in
+                Annotation("Route option", coordinate: PlaceMapFocus.labelPoint(on: route, fraction: min(0.8, 0.35 + Double(index) * 0.25)).coordinate) {
+                    Button { navigation.select(route) } label: {
+                        Text("\(max(1, Int(ceil(route.durationSeconds / 60)))) min")
+                            .font(.caption.bold()).padding(8)
+                            .foregroundStyle(navigation.selectedRoute?.id == route.id ? Color.white : Color.primary)
+                            .background(navigation.selectedRoute?.id == route.id ? Color.blue : Color(.secondarySystemBackground),
+                                        in: RoundedRectangle(cornerRadius: 12))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(RoutePresentation.title(for: route, in: navigation.routes))
+                }
+                .annotationTitles(.hidden)
+            }
+        }
+        if let destination = selectedPlace ?? navigation.destination {
+            Marker(destination.name, systemImage: destination.symbol ?? "mappin", coordinate: destination.point.coordinate)
+                .tint(PlaceCategoryStyle.color(for: destination.symbol))
+        }
+        if model.fix == nil, let point = planningLocation.currentPoint {
+            Annotation("Your position", coordinate: point.coordinate) {
+                Circle().fill(.blue).frame(width: 14, height: 14)
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 3))
+            }
+            .annotationTitles(.hidden)
+        }
+    }
+
+    private func zoom(to bounds: CameraBounds) {
         following = false
-        let rect = cluster.bounds.mapRect
+        let rect = bounds.mapRect
         let padding = max(200, max(rect.width, rect.height) * 0.35)
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
             camera = .rect(rect.insetBy(dx: -padding, dy: -padding))
@@ -499,7 +512,8 @@ struct ContentView: View {
 
     private func refreshTrafficData() {
         guard showLiveTraffic, model.source == .live, scenePhase == .active else { return }
-        let bounds = model.fix.map { CameraViewportQuery.around(GeoPoint(latitude: $0.latitude, longitude: $0.longitude)) } ?? cameraBounds
+        let drivingBounds = model.fix.map { CameraViewportQuery.around(GeoPoint(latitude: $0.latitude, longitude: $0.longitude)) }
+        let bounds = model.isDriving ? (drivingBounds ?? cameraBounds) : (cameraBounds ?? drivingBounds)
         if let bounds { traffic.fetchMap(bounds: bounds, route: navigation.selectedRoute, endpoint: apiURL) }
     }
 

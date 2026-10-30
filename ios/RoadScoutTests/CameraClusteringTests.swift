@@ -1,4 +1,5 @@
 import CoreLocation
+import Foundation
 import MapKit
 import Testing
 @testable import RoadScout
@@ -7,6 +8,13 @@ private func camera(_ id: String, _ latitude: Double, _ longitude: Double, headi
     CameraRecord(id: id, coordinate: GeoPoint(latitude: latitude, longitude: longitude), kind: "fixed",
                  maxSpeedKph: 80, directionDegrees: heading, association: "relation",
                  sourceIDs: ["osm:node:\(id)"], status: "mapped")
+}
+
+private func trafficEvent(_ id: String, kind: String, _ latitude: Double, _ longitude: Double) throws -> TrafficFeature {
+    let object: [String: Any] = ["id": id, "sourceId": "test", "kind": kind, "title": id,
+        "geometry": ["encoding": "polyline6", "data": CameraRouteGeometry.encode([GeoPoint(latitude: latitude, longitude: longitude)])],
+        "observedAt": "2026-10-28T12:00:00Z", "matched": false]
+    return try JSONDecoder().decode(TrafficFeature.self, from: JSONSerialization.data(withJSONObject: object))
 }
 
 struct CameraClusteringTests {
@@ -46,6 +54,47 @@ struct CameraClusteringTests {
         }
         let tight = CameraClusterer.items(cluster.cameras, in: cluster.bounds)
         #expect(tight.count > broad.count)
+    }
+
+    @Test func nearbyCamerasAndTrafficEventsShareOneCluster() throws {
+        let event = try trafficEvent("roadworks", kind: "roadworks", 51.0001, 4.0001)
+        let items = MapOverlayClusterer.items(cameras: [camera("camera", 51.0, 4.0)], events: [event], in: nl)
+        guard case .cluster(let cluster) = try #require(items.first) else {
+            Issue.record("Expected a combined cluster"); return
+        }
+        #expect(cluster.count == 2)
+        #expect(cluster.cameras.map(\.id) == ["camera"])
+        #expect(cluster.events.map(\.id) == ["roadworks"])
+        #expect(cluster.hasEvents && !cluster.hasAverageZone)
+    }
+
+    @Test func separatedTrafficEventsStayIndividual() throws {
+        let nearby = try trafficEvent("near", kind: "incident", 52.0, 5.0)
+        let far = try trafficEvent("far", kind: "roadworks", 51.0, 4.0)
+        let items = MapOverlayClusterer.items(cameras: [], events: [nearby, far], in: nl)
+        #expect(items.count == 2)
+        #expect(items.allSatisfy { if case .event = $0 { return true }; return false })
+    }
+
+    @Test func clusteringGridDoesNotShiftWhenTheViewportPans() {
+        let cameras = [camera("a", 52.0, 5.0), camera("b", 52.0002, 5.0002), camera("c", 52.1, 5.1)]
+        let first = MapOverlayClusterer.items(cameras: cameras, events: [],
+            in: CameraBounds(south: 51.9, west: 4.9, north: 52.2, east: 5.2))
+        let panned = MapOverlayClusterer.items(cameras: cameras, events: [],
+            in: CameraBounds(south: 51.91, west: 4.91, north: 52.21, east: 5.21))
+        #expect(first.map(\.id) == panned.map(\.id))
+    }
+
+    @Test func zoomedOutUsesLargerGroupingDistance() {
+        let cameras = [camera("a", 52.0, 5.0), camera("b", 52.002, 5.002)]
+        let tight = MapOverlayClusterer.items(cameras: cameras, events: [],
+            in: CameraBounds(south: 51.999, west: 4.999, north: 52.003, east: 5.003))
+        let wide = MapOverlayClusterer.items(cameras: cameras, events: [],
+            in: CameraBounds(south: 51.6, west: 4.6, north: 52.4, east: 5.4))
+        #expect(tight.allSatisfy { if case .camera = $0 { return true }; return false })
+        #expect(wide.contains { if case .cluster = $0 { return true }; return false })
+        #expect(MapDisplayScale.showsClosureEndpoints(in: CameraBounds(south: 51.999, west: 4.999, north: 52.003, east: 5.003)))
+        #expect(!MapDisplayScale.showsClosureEndpoints(in: CameraBounds(south: 51.6, west: 4.6, north: 52.4, east: 5.4)))
     }
 
     @Test func headingConeUsesEnforcedTravelBearingAndNeedsKnownDirection() throws {

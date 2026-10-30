@@ -24,7 +24,7 @@ struct RouteTrafficMetadata: Decodable, Equatable, Sendable {
     }
 }
 
-struct TrafficSource: Decodable, Equatable, Sendable {
+struct TrafficSource: Codable, Equatable, Sendable {
     let id: String
     let countries: [String]
     let attribution: String
@@ -32,7 +32,7 @@ struct TrafficSource: Decodable, Equatable, Sendable {
     let message: String?
 }
 
-struct TrafficFeature: Decodable, Equatable, Identifiable, Sendable {
+struct TrafficFeature: Codable, Equatable, Identifiable, Sendable {
     let id: String
     let sourceId: String
     let kind: String
@@ -50,7 +50,7 @@ struct TrafficFeature: Decodable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, sourceId, kind, title, geometry, observedAt, expiresAt, matched, congestion, speedKph, travelSeconds, normalSeconds, routeStartMeters, routeEndMeters
     }
-    private struct Geometry: Decodable { let encoding: String; let data: String }
+    private struct Geometry: Codable { let encoding: String; let data: String }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id); sourceId = try c.decode(String.self, forKey: .sourceId)
@@ -68,9 +68,24 @@ struct TrafficFeature: Decodable, Equatable, Identifiable, Sendable {
         routeStartMeters = try? c.decode(Double.self, forKey: .routeStartMeters)
         routeEndMeters = try? c.decode(Double.self, forKey: .routeEndMeters)
     }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(sourceId, forKey: .sourceId)
+        try c.encode(kind, forKey: .kind); try c.encode(title, forKey: .title)
+        try c.encode(Geometry(encoding: "polyline6", data: CameraRouteGeometry.encode(points)), forKey: .geometry)
+        try c.encode(WeatherWireDate.string(from: observedAt), forKey: .observedAt)
+        try c.encodeIfPresent(expiresAt.map(WeatherWireDate.string), forKey: .expiresAt)
+        try c.encode(matched, forKey: .matched)
+        try c.encodeIfPresent(congestion, forKey: .congestion)
+        try c.encodeIfPresent(speedKph, forKey: .speedKph)
+        try c.encodeIfPresent(travelSeconds, forKey: .travelSeconds)
+        try c.encodeIfPresent(normalSeconds, forKey: .normalSeconds)
+        try c.encodeIfPresent(routeStartMeters, forKey: .routeStartMeters)
+        try c.encodeIfPresent(routeEndMeters, forKey: .routeEndMeters)
+    }
 }
 
-struct TrafficMapResponse: Decodable, Sendable {
+struct TrafficMapResponse: Codable, Equatable, Sendable {
     let sources: [TrafficSource]
     let features: [TrafficFeature]
     let routingEnabled: Bool

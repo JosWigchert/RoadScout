@@ -1,5 +1,29 @@
 # Testing
 
+## Traffic refresh root-cause correction · 2026-10-30
+
+Acceptance checks: `docs/traffic-refresh-acceptance.md`. Read-only staging POST `/v1/traffic` for bbox 51.8/4.6–52.2/5.3 returned HTTP 200 in 0.22 seconds, but `truncated: true`: 1,500 features included 700 unmatched normal-flow records and only 265 drawable congested records. This confirms response-budget starvation, not network slowness for that request. No staging deployment was performed.
+
+Implemented buffered-area request reuse, no disk replay over populated maps, partial-snapshot retention until expiry, complete-snapshot removal, viewport-first non-driving queries, stable coarse render prioritization and a bounded 600-line/40,000-point flow budget. Closure strokes are dashed dark red; overview strokes thin to 1.5 pt.
+
+Verified: full Debug simulator test action passed (xcresult: 195 passed, 4 opt-in skips, zero failures), Release simulator build passed, `go test -race ./...` passed and `git diff --check` passed. New regression coverage checks buffered pans/minute refresh, no cache reload during refresh, truncated/complete removal, expiry and overview widths; Go coverage verifies invisible records cannot starve drawable flow/events and unmatched congestion still queues matching. Synthetic close-zoom preview inspected. Updated-server staging, live panning/zooming and physical road/offline acceptance remain pending.
+
+## Traffic cache, offline fallback and stable clustering · 2026-10-30
+
+Reported: overlays disappeared after refresh and camera/event groups kept changing while the map moved. Added a per-endpoint/scope disk cache (up to 8 entries, 4 MB each), cache-first loading, offline fallback, incremental merge by feature ID, and no-op response suppression. Clustering now uses a fixed global grid whose cell size grows when zoomed out, so panning no longer shifts group boundaries. Closure endpoint icons are hidden when the viewport span exceeds 0.12° while the red closure line remains.
+
+Verified: Debug full suite passed (194 tests in 40 suites, zero failures), including cache round-trip/offline fallback, stable-grid panning, zoom-dependent grouping and closure-icon scale tests. Release simulator build passed. Synthetic traffic preview remains visually correct. Real offline/device behavior and live traffic availability were not verified.
+
+## Traffic overlay stability · 2026-10-30
+
+Reported: red/yellow flow lines faded in and out and were not always visible. The flow layer switched between two separate map layers when route offsets appeared/disappeared, display order changed with the map center, route-flow geometry was reclipped on every traveled-progress update, and identical traffic responses replaced the map on every refresh. The fix uses one stable flow layer above the route, deterministic ID ordering, route clipping only to the backend route offsets, no-op response suppression, and no pre-fetch expiry mutation. Debug full suite passed (190 tests in 39 suites, zero failures); synthetic traffic preview still shows red heavy, yellow slow and closure states. Live driving verification remains pending.
+
+## Grouped map overlays and traffic styling · 2026-10-29
+
+Acceptance before implementation: group nearby cameras and point traffic events into counted clusters while retaining individual detail selection; tapping a cluster zooms to its bounds. Render matched slow flow yellow and heavy flow red over a white casing. Render closures as a thin red line with no-entry endpoint markers at both ends and selectable endpoints.
+
+Verified: Debug simulator build and full suite passed (190 tests in 39 suites, zero failures), including mixed camera/event clustering, separated events and closure endpoint selection. Release simulator build passed. A synthetic `--traffic-preview` was inspected with heavy red flow, slow yellow flow, a closure line with two no-entry endpoint markers and a roadworks marker. This is synthetic UI verification only; no live road, physical-device or traffic-data claim is made.
+
 ## NAS traffic mount regression · 2026-10-29
 
 Default NAS Compose rendering has no traffic bind mount and an empty container `TRAFFIC_CONFIG`; built-in NDW defaults are verified enabled with traffic routing disabled. An optional absolute host override renders as a read-only bind and sets the in-container config path. `TestNASDeploymentTrafficOverride` simulates default/override deployment, rejects relative paths, and checks a failed Docker-host readability probe prevents `up`. `go test -race -timeout 90s ./...`, `go vet ./...`, shell syntax, both actual Compose renders and `git diff --check` passed. The Docker daemon/NAS was not available here; actual staging deployment must be rerun on the NAS after committing/pushing the fix.

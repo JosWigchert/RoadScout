@@ -1,5 +1,21 @@
 # Milestones
 
+## Traffic refresh root-cause correction · 2026-10-30
+
+Staging diagnosis found fast but truncated map responses dominated by invisible flow. Go now reserves the response budget for drawable congestion/events while still queuing unmatched congestion. iOS reuses buffered areas, avoids disk-cache rollback and preserves fresh missing features in partial responses. Closures are dashed dark red and overview traffic lines are thinner. Debug simulator suite, Release simulator build and Go race suite passed. Acceptance checks: `docs/traffic-refresh-acceptance.md`; backend deployment and live/device acceptance are pending.
+
+## Traffic cache, offline fallback and stable clustering · 2026-10-30
+
+Traffic map responses now load cache-first from a bounded local disk cache, merge incrementally by feature ID, suppress identical replacements, and remain available when the network fails. Camera/event clustering uses a fixed global grid with larger cells at lower zoom, so panning no longer regroups markers; closure endpoint icons hide when zoomed out while the closure line remains. Debug full suite passed (194 tests in 40 suites, zero failures) and Release simulator build passed. Real offline/device and live-traffic verification remain pending.
+
+## Traffic overlay stability · 2026-10-30
+
+Removed causes of red/yellow flow lines fading in and out: flow now renders in one stable layer above the route, feature order is deterministic, route-flow geometry no longer changes with traveled progress, identical map responses do not replace the map, and fetch no longer mutates the current map before receiving new data. Debug full suite passed (190 tests in 39 suites, zero failures); synthetic traffic preview verified. Live driving confirmation remains pending.
+
+## Grouped map overlays and traffic styling · 2026-10-29
+
+Cameras and point traffic events now share counted map clusters; cluster taps zoom to their bounds, while individual camera and event markers keep their detail cards. Matched slow/heavy congestion renders as yellow/red road segments with a white casing, and closures render a thin red connecting line with no-entry markers at both geometry endpoints. Debug full suite passed (190 tests in 39 suites, zero failures) and Release simulator build passed. Synthetic traffic preview inspected; live road/device acceptance remains pending.
+
 ## NAS traffic bind-mount fix · 2026-10-29
 
 Removed the default runner-checkout traffic bind mount that failed with a containerized runner and host Docker daemon. NAS deployments now use built-in NDW defaults; optional absolute Docker-host overrides use a read-only Compose overlay and a daemon-side readability check before service replacement. Default/override Compose rendering, simulated deployment failure handling, Go race tests/vet and shell checks passed. Actual staging deployment remains to be rerun on the NAS.

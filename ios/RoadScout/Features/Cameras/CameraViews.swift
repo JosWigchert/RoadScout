@@ -1,14 +1,18 @@
 import SwiftUI
 import MapKit
 
-struct CameraMapContent: MapContent {
+struct MapOverlayContent: MapContent {
     let cameras: [CameraRecord]
+    let events: [TrafficFeature]
     let zones: [AverageSpeedZone]
     let bounds: CameraBounds?
     let selectCamera: (CameraRecord) -> Void
-    let selectCluster: (CameraCluster) -> Void
+    let selectEvent: (TrafficFeature) -> Void
+    let selectCluster: (CameraBounds) -> Void
 
-    private var items: [CameraMapItem] { CameraClusterer.items(cameras, in: bounds) }
+    private var items: [MapOverlayItem] {
+        MapOverlayClusterer.items(cameras: cameras, events: events, in: bounds)
+    }
 
     @MapContentBuilder var body: some MapContent {
         ForEach(zones.filter { $0.geometryVerified && $0.geometry.count > 1 }) { zone in
@@ -35,15 +39,27 @@ struct CameraMapContent: MapContent {
                     .accessibilityHint("Shows mapped speed and heading")
                 }
                 .annotationTitles(.hidden)
+            case .event(let event):
+                if let point = event.points.first {
+                    Annotation(event.title, coordinate: point.coordinate) {
+                        Button { selectEvent(event) } label: {
+                            TrafficEventMarker(kind: event.kind)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(event.title)
+                        .accessibilityHint("Shows traffic details")
+                    }
+                    .annotationTitles(.hidden)
+                }
             case .cluster(let cluster):
-                Annotation(String(localized: "\(cluster.cameras.count) mapped cameras"),
+                Annotation(String(localized: "\(cluster.count) nearby map items"),
                            coordinate: cluster.coordinate) {
-                    Button { selectCluster(cluster) } label: {
-                        CameraClusterBadge(count: cluster.cameras.count,
-                                           hasAverageZone: cluster.cameras.contains { $0.kind == "average_speed" })
+                    Button { selectCluster(cluster.bounds) } label: {
+                        MapClusterBadge(count: cluster.count, hasEvents: cluster.hasEvents,
+                                        hasAverageZone: cluster.hasAverageZone)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(String(localized: "\(cluster.cameras.count) mapped cameras. Zoom in."))
+                    .accessibilityLabel(String(localized: "\(cluster.count) nearby map items. Zoom in."))
                 }
                 .annotationTitles(.hidden)
             }
@@ -90,8 +106,9 @@ struct CameraDot: View {
     }
 }
 
-struct CameraClusterBadge: View {
+struct MapClusterBadge: View {
     let count: Int
+    let hasEvents: Bool
     let hasAverageZone: Bool
 
     var body: some View {
@@ -99,7 +116,7 @@ struct CameraClusterBadge: View {
             .font(.caption2.bold()).monospacedDigit()
             .foregroundStyle(.white)
             .frame(width: 34, height: 34)
-            .background(hasAverageZone ? Color.purple : Color.blue, in: Circle())
+            .background(hasEvents ? Color.orange : (hasAverageZone ? Color.purple : Color.blue), in: Circle())
             .overlay(Circle().strokeBorder(.white.opacity(0.95), lineWidth: 3))
             .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
     }

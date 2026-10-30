@@ -107,6 +107,41 @@ func TestTrafficBBoxIncludesCrossingGeometryAndDoesNotConfirmByProximity(t *test
 		t.Fatal(w.Body.String())
 	}
 }
+func TestTrafficMapBudgetExcludesInvisibleFlowButQueuesCongestionMatching(t *testing.T) {
+	now := time.Now().UTC()
+	s := newTrafficService(defaultTrafficConfig(), nil)
+	s.now = func() time.Time { return now }
+	var flow []TrafficFeature
+	for i := 0; i < 1600; i++ {
+		f := TrafficFeature{ID: fmt.Sprintf("a-%04d", i), SourceID: "ndw-nl", Kind: "flow", Congestion: "normal", Points: []Point{{52, 5}, {52.001, 5}}, ObservedAt: now}
+		setTrafficGeometry(&f)
+		flow = append(flow, f)
+	}
+	unmatched := flow[0]
+	unmatched.ID, unmatched.Congestion = "unmatched", "heavy"
+	flow = append(flow, unmatched)
+	matched := unmatched
+	matched.ID, matched.Matched, matched.GraphStamp = "z-drawable", true, s.graphStamp
+	flow = append(flow, matched)
+	event := TrafficFeature{ID: "z-closure", SourceID: "ndw-nl", Kind: "closure", Points: []Point{{52, 5}}, ObservedAt: now}
+	setTrafficGeometry(&event)
+	s.snapshots["ndw-nl"] = trafficProviderSnapshot{Events: []TrafficFeature{event}, EventsAt: now, Flow: flow, FlowAt: now}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/traffic", strings.NewReader(`{"bbox":{"south":51.9,"north":52.1,"west":4.9,"east":5.1}}`))
+	r.Header.Set("Content-Type", "application/json")
+	s.serveHTTP(w, r)
+	var response TrafficResponse
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Truncated || len(response.Features) != 2 {
+		t.Fatal(w.Body.String())
+	}
+	if response.Features[0].Kind != "closure" || response.Features[1].ID != "z-drawable" {
+		t.Fatal(response.Features)
+	}
+	if _, ok := s.wanted["unmatched"]; !ok {
+		t.Fatal("unmatched congestion was not queued for road matching")
+	}
+}
+
 func TestTrafficBridgeRequiresGraphIdentityFreshnessAndAcknowledgedSnapshot(t *testing.T) {
 	now := time.Now().UTC()
 	stamp := int64(42)

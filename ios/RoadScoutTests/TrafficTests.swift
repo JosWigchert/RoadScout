@@ -11,6 +11,55 @@ private func trafficRoute(_ id: String = "current", seconds: Double = 900, mode:
             coveragePercent: 50, expiresAt: trafficEpoch.addingTimeInterval(2000)))
 }
 
+private func trafficFeatureFixture(_ id: String, title: String = "Jam", observedAt: Date = trafficEpoch,
+                                   congestion: String = "heavy") throws -> TrafficFeature {
+    let object: [String: Any] = ["id": id, "sourceId": "test", "kind": "flow", "title": title,
+        "geometry": ["encoding": "polyline6", "data": CameraRouteGeometry.encode([GeoPoint(latitude: 52, longitude: 5), GeoPoint(latitude: 52.001, longitude: 5)])],
+        "observedAt": WeatherWireDate.string(from: observedAt), "matched": true, "congestion": congestion]
+    return try JSONDecoder().decode(TrafficFeature.self, from: JSONSerialization.data(withJSONObject: object))
+}
+
+private func trafficResponse(_ features: [TrafficFeature]) -> TrafficMapResponse {
+    TrafficMapResponse(sources: [], features: features, routingEnabled: false, truncated: false)
+}
+
+private actor OfflineTrafficClient: TrafficProviding {
+    func fetch(bounds: CameraBounds, route: DrivingRoute?, endpoint: String) async throws -> TrafficMapResponse {
+        throw TrafficClientError.unavailable
+    }
+    func refresh(route: DrivingRoute, fix: LocationFix, traveledMeters: Double, checkAlternatives: Bool, endpoint: String) async throws -> TrafficRefresh {
+        throw TrafficClientError.unavailable
+    }
+}
+
+private actor TrafficCacheStub: TrafficCaching {
+    let entry: TrafficCacheEntry?
+    private(set) var loads = 0
+    init(entry: TrafficCacheEntry?) { self.entry = entry }
+    func load(scope: TrafficCacheScope) async throws -> TrafficCacheEntry? {
+        loads += 1
+        return entry?.scope == scope ? entry : nil
+    }
+    func loadLatest(endpoint: String) async throws -> TrafficCacheEntry? {
+        loads += 1
+        return entry?.scope.endpoint == endpoint ? entry : nil
+    }
+    func save(_ entry: TrafficCacheEntry) async throws {}
+}
+
+private actor MapTrafficSequence: TrafficProviding {
+    let responses: [TrafficMapResponse]
+    private(set) var bounds: [CameraBounds] = []
+    init(_ responses: [TrafficMapResponse]) { self.responses = responses }
+    func fetch(bounds: CameraBounds, route: DrivingRoute?, endpoint: String) -> TrafficMapResponse {
+        self.bounds.append(bounds)
+        return responses[min(self.bounds.count - 1, responses.count - 1)]
+    }
+    func refresh(route: DrivingRoute, fix: LocationFix, traveledMeters: Double, checkAlternatives: Bool, endpoint: String) throws -> TrafficRefresh {
+        throw TrafficClientError.unavailable
+    }
+}
+
 struct TrafficOfferPolicyTests {
     @Test func confirmationCountdownAndRejectionCooldown() throws {
         let route = try trafficRoute("alternative", seconds: 600)
@@ -90,6 +139,83 @@ private actor TrafficRouter: RoutingProviding {
 }
 
 @MainActor struct TrafficModelTests {
+    @Test func populatedMapDoesNotReloadDiskCacheOnPanOrRefresh() async throws {
+        let clock = TrafficClock()
+        let cache = TrafficCacheStub(entry: nil)
+        let client = MapTrafficSequence([trafficResponse([try trafficFeatureFixture("live")])])
+        let model = TrafficModel(client: client, cache: cache, now: { clock.now })
+        let bounds = CameraBounds(south: 51.99, west: 4.99, north: 52.01, east: 5.01)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.count == 1 }
+        let initialLoads = await cache.loads
+        clock.advance(61)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { await client.bounds.count == 2 }
+        #expect(await cache.loads == initialLoads)
+        model.clear()
+    }
+
+    @Test func truncatedSnapshotsCannotKeepExpiredTraffic() async throws {
+        let clock = TrafficClock()
+        let partial = TrafficMapResponse(sources: [], features: [], routingEnabled: false, truncated: true)
+        let client = MapTrafficSequence([trafficResponse([try trafficFeatureFixture("old")]), partial])
+        let model = TrafficModel(client: client, cache: TrafficCacheStub(entry: nil), now: { clock.now })
+        let bounds = CameraBounds(south: 51.99, west: 4.99, north: 52.01, east: 5.01)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.count == 1 }
+        clock.advance(181)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.isEmpty == true }
+        model.clear()
+    }
+
+    @Test func bufferedAreaReusesRequestsAndRefreshesAfterOneMinute() async throws {
+        let clock = TrafficClock()
+        let client = MapTrafficSequence([trafficResponse([try trafficFeatureFixture("live")])])
+        let model = TrafficModel(client: client, cache: TrafficCacheStub(entry: nil), now: { clock.now })
+        let bounds = CameraBounds(south: 51.99, west: 4.99, north: 52.01, east: 5.01)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.count == 1 }
+        for offset in 1...10 {
+            let delta = Double(offset) * 0.001
+            model.fetchMap(bounds: CameraBounds(south: bounds.south + delta, west: bounds.west + delta,
+                                               north: bounds.north + delta, east: bounds.east + delta),
+                           route: nil, endpoint: "https://example.com")
+        }
+        #expect(await client.bounds.count == 1)
+        #expect(await client.bounds.first?.contains(bounds) == true)
+        clock.advance(61)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { await client.bounds.count == 2 }
+        model.clear()
+    }
+
+    @Test func partialSnapshotsRetainFreshMissingRecordsButCompleteSnapshotsRemoveThem() async throws {
+        let clock = TrafficClock()
+        let first = trafficResponse([try trafficFeatureFixture("a")])
+        let partial = TrafficMapResponse(sources: [], features: [try trafficFeatureFixture("b")], routingEnabled: false, truncated: true)
+        let client = MapTrafficSequence([first, partial, trafficResponse([])])
+        let model = TrafficModel(client: client, cache: TrafficCacheStub(entry: nil), now: { clock.now })
+        let bounds = CameraBounds(south: 51.99, west: 4.99, north: 52.01, east: 5.01)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.map(\.id) == ["a"] }
+        clock.advance(61)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.map(\.id) == ["a", "b"] }
+        clock.advance(61)
+        model.fetchMap(bounds: bounds, route: nil, endpoint: "https://example.com")
+        await awaitTraffic { model.map?.features.isEmpty == true }
+        model.clear()
+    }
+
+    @Test func overviewTrafficStrokesAreThinnerThanStreetLevel() {
+        let close = CameraBounds(south: 52, west: 5, north: 52.01, east: 5.01)
+        let wide = CameraBounds(south: 51, west: 4, north: 53, east: 6)
+        #expect(MapDisplayScale.flowWidth(in: wide) == 1.5)
+        #expect(MapDisplayScale.flowWidth(in: wide) < MapDisplayScale.flowWidth(in: close))
+        #expect(MapDisplayScale.closureWidth(in: close) < MapDisplayScale.flowWidth(in: close))
+    }
+
     @Test func timeoutRevalidatesAndSwitchesButBackgroundCancels() async throws {
         for background in [false, true] {
             let clock = TrafficClock(), navigation = try await startedTrafficNavigation(clock)
@@ -140,6 +266,38 @@ private actor TrafficRouter: RoutingProviding {
         #expect(navigation.progress?.remainingSeconds ?? 1000 < 900)
         navigation.end()
     }
+
+    @Test func cachedTrafficSurvivesOfflineFetch() async throws {
+        let feature = try trafficFeatureFixture("cached")
+        let response = trafficResponse([feature])
+        let scope = TrafficCacheScope(endpoint: "https://example.com",
+                                      bounds: CameraBounds(south: 51, west: 4, north: 53, east: 6), routeID: nil)
+        let entry = TrafficCacheEntry(scope: scope, fetchedAt: trafficEpoch, response: response)
+        let model = TrafficModel(client: OfflineTrafficClient(), cache: TrafficCacheStub(entry: entry),
+                                 now: { trafficEpoch })
+        model.fetchMap(bounds: scope.bounds, route: nil, endpoint: scope.endpoint)
+        await awaitTraffic { model.map?.features.count == 1 }
+        #expect(model.map?.features.first?.id == "cached")
+        #expect(model.status?.contains("cached") == true)
+    }
+}
+
+struct TrafficCacheTests {
+    @Test func diskCacheRoundTripsFeaturesAndFindsLatestEndpointEntry() async throws {
+        let directory = URL.temporaryDirectory.appendingPathComponent("RoadScoutTrafficCache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = TrafficDiskCache(directory: directory, maximumEntries: 4, maximumBytes: 200_000)
+        let feature = try trafficFeatureFixture("cached")
+        let response = trafficResponse([feature])
+        let scope = TrafficCacheScope(endpoint: "https://example.com",
+                                      bounds: CameraBounds(south: 51, west: 4, north: 53, east: 6), routeID: "route")
+        try await cache.save(TrafficCacheEntry(scope: scope, fetchedAt: trafficEpoch, response: response))
+        let loaded = try #require(try await cache.load(scope: scope))
+        #expect(loaded.response == response)
+        #expect(loaded.response.features.first?.points == feature.points)
+        let latest = try #require(try await cache.loadLatest(endpoint: scope.endpoint))
+        #expect(latest.scope == scope)
+    }
 }
 
 struct TrafficDecodingTests {
@@ -153,6 +311,22 @@ struct TrafficDecodingTests {
         #expect(response.features.first?.points.count == 1)
         #expect(throws: RoutingError.self) { try Polyline6.decode(geometry) }
     }
+    @Test func closurePresentationUsesGeometryEndpoints() throws {
+        let points = [GeoPoint(latitude: 52, longitude: 5), GeoPoint(latitude: 52.001, longitude: 5),
+                      GeoPoint(latitude: 52.002, longitude: 5)]
+        func feature(_ geometry: [GeoPoint]) throws -> TrafficFeature {
+            let object: [String: Any] = ["id": "closed", "sourceId": "test", "kind": "closure", "title": "Closed",
+                "geometry": ["encoding": "polyline6", "data": CameraRouteGeometry.encode(geometry)],
+                "observedAt": "2026-10-28T12:00:00Z", "matched": true]
+            return try JSONDecoder().decode(TrafficFeature.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let closed = try feature(points)
+        let endpoints = RoadClosurePresentation.endpoints(for: TrafficDisplayFeature(feature: closed, points: points))
+        #expect(endpoints == [points[0], points[2]])
+        let point = try feature([points[0]])
+        #expect(RoadClosurePresentation.endpoints(for: TrafficDisplayFeature(feature: point, points: [points[0]])) == [points[0]])
+    }
+
     @Test func geometryTimestampsAndSourceCountriesDecodeWithoutCountrySpecificUI() throws {
         let geometry = CameraRouteGeometry.encode([GeoPoint(latitude: 52, longitude: 5), GeoPoint(latitude: 52.001, longitude: 5)])
         let object: [String: Any] = ["sources": [["id": "provider", "countries": ["NL", "BE"], "attribution": "Test", "stale": false]],

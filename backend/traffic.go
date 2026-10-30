@@ -383,12 +383,21 @@ func (s *trafficService) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	all, sources := s.features()
+	// Spend the response budget on events first, then drawable congestion.
+	// Normal/unmatched flow remains available to ingestion and route costing,
+	// but must not crowd useful map features out of the bounded response.
+	sort.SliceStable(all, func(i, j int) bool {
+		return all[i].Kind != "flow" && all[j].Kind == "flow"
+	})
 	out := TrafficResponse{GeneratedAt: s.now().UTC(), Sources: sources, Features: []TrafficFeature{}, RoutingEnabled: s.liveReady()}
 	b := q.BBox
 	geometryBytes := 0
 	deadline := time.Now().Add(2 * time.Second)
 	cumulative := cameraCumulative(points)
 	for _, f := range all {
+		if f.Kind == "flow" && f.Congestion != "slow" && f.Congestion != "heavy" {
+			continue
+		}
 		if time.Now().After(deadline) {
 			out.Truncated = true
 			break
@@ -425,6 +434,9 @@ func (s *trafficService) serveHTTP(w http.ResponseWriter, r *http.Request) {
 					s.wanted[f.ID] = s.now()
 				}
 				s.mu.Unlock()
+			}
+			if f.Kind == "flow" && !f.Matched {
+				continue
 			}
 			matchedIDs, totalIDs := 0.0, 0.0
 			for _, edge := range f.Edges {
